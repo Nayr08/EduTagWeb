@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EduTag - Admin Dashboard</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="admin-style.css">
+</head>
+
+<body>
+
+ <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+
+      <!-- Add this close button -->
+      <button class="sidebar-close" onclick="toggleSidebar()">
+        <i class="fas fa-bars"></i>
+      </button>
+      <div class="sidebar-brand">
+        <h3>Philippine Nursing Students' Association</h3>
+        <p>Admin Panel</p>
+      </div>
+    </div>
+	
+	<nav class="sidebar-nav">
+      <ul>
+        <li><a href="#" class="nav-link active" data-section="dashboard">
+            <i class="fas fa-home"></i>
+            <span>Dashboard</span>
+          </a></li>
+        <li><a href="#" class="nav-link" data-section="attendance">
+            <i class="fas fa-clipboard-check"></i>
+            <span>Attendance</span>
+          </a></li>
+        <li><a href="#" class="nav-link" data-section="students">
+            <i class="fas fa-users"></i>
+            <span>Students</span>
+          </a></li>
+        <li><a href="#" class="nav-link" data-section="events">
+            <i class="fas fa-calendar-alt"></i>
+            <span>Events</span>
+          </a></li>
+        <li><a href="#" class="nav-link" data-section="sanctions">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>Sanctions</span>
+          </a></li>
+      </ul>
+    </nav>
+	
+	<div class="sidebar-footer">
+      <div class="admin-info">
+        <div class="admin-name" id="adminName">Loading...</div>
+        <div class="admin-role">System Admin</div>
+      </div>
+      <button class="logout-btn" onclick="logout()">
+        <i class="fas fa-sign-out-alt"></i>
+        Logout
+      </button>
+    </div>
+  </div>
+
+
+ <!-- Main Content -->
+  <div class="main-content" id="mainContent">
+    <!-- Top Header -->
+    <div class="top-header">
+      <div style="display: flex; align-items: center; gap: 15px;">
+        <button class="mobile-toggle" onclick="toggleSidebar()">
+          <i class="fas fa-bars"></i>
+        </button>
+        <h1 class="page-title" id="pageTitle">Dashboard</h1>
+      </div>
+      <div class="header-actions">
+        <div class="search-box">
+          <i class="fas fa-search"></i>
+          <input type="text" placeholder="Search students, events..." id="searchInput">
+        </div>
+
+      </div>
+    </div>
+
+<!-- Dashboard Section -->
+    <div class="content-section active" id="dashboard">
+      <!-- Stats Cards -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-card-header">
+            <div class="stat-card-title">Total Students</div>
+            <div class="stat-card-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+              <i class="fas fa-users"></i>
+            </div>
+          </div>
+          <div class="stat-card-value" id="statTotalStudents">0</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card-header">
+            <div class="stat-card-title">Active Events</div>
+            <div class="stat-card-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+              <i class="fas fa-calendar-alt"></i>
+            </div>
+          </div>
+          <div class="stat-card-value" id="statActiveEvents">0</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card-header">
+            <div class="stat-card-title">Today's Attendance</div>
+            <div class="stat-card-icon" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+              <i class="fas fa-clipboard-check"></i>
+            </div>
+          </div>
+          <div class="stat-card-value" id="statAttendance">0</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card-header">
+            <div class="stat-card-title">Late & Absent</div>
+            <div class="stat-card-icon" style="background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%);">
+              <i class="fas fa-user-times"></i>
+            </div>
+          </div>
+          <div class="stat-card-value" id="statLateAbsent">
+            <div>Late Student/s: 0</div>
+            <div>Absent Student/s: 0</div>
+          </div>
+        </div>
+
+      </div>
+	  
+	   <!-- Event Selector -->
+      <div class="section-header">
+        <h2 class="section-title">Recent Activity</h2>
+        <div class="section-actions">
+          <select id="dashboardEventFilter" class="form-control" style="width: auto;">
+            <option value="">Select Event</option>
+            <!-- Supabase will populate here -->
+          </select>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Time</th>
+              <th>Student</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="recentActivityTable">
+            <tr>
+              <td colspan="4">Select an event to view activity...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
