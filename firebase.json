@@ -10,6 +10,7 @@
       "mydatabase.md",
       "TESTING_CHECKLIST.md",
       "*.md",
+      "*.sql",
       "package.json",
       "package-lock.json",
       "supabase/**"
