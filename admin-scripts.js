@@ -26,12 +26,9 @@ navLinks.forEach(link => {
   });
 });
 
-// Show notifications (for bell icon)
-function showNotifications() {
-  alert("You have 3 new notifications.");
-}
 
-// Dummy logout function
+
+
 function logout() {
   alert("Logging out...");
   // Redirect to login.html if needed
@@ -160,7 +157,6 @@ function loadDefaultModalContent(modal) {
 
 // Placeholder functions for button actions
 function addStudent() {
-  
   openModal('studentModal');
 }
 

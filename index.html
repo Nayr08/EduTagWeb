@@ -6,6 +6,7 @@
   <title>EduTag - Login</title>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
   <link rel="stylesheet" href="login-style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='16' font-size='16' fill='%23000'>📚</text></svg>">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -48,7 +49,7 @@
         <label for="username">Student ID</label>
         <div class="input-wrapper">
           <i class="fas fa-user"></i>
-          <input type="text" id="username" class="form-control" placeholder="Enter your Student ID " required>
+          <input type="text" id="username" class="form-control" placeholder="Enter your Student ID " autocomplete="username" required>
         </div>
       </div>
 
@@ -57,7 +58,7 @@
         <label for="password">Password</label>
         <div class="input-wrapper">
           <i class="fas fa-lock"></i>
-          <input type="password" id="password" class="form-control" placeholder="Enter your password" required>
+          <input type="password" id="password" class="form-control" placeholder="Enter your password" autocomplete="current-password" required>
           <button type="button" class="password-toggle" id="togglePassword">
             <i class="fas fa-eye" id="passwordToggleIcon"></i>
           </button>
@@ -74,13 +75,15 @@
     </form>
 
     <!-- Footer -->
-    <div class="footer-text">
-      © 2025 EduTag. All rights reserved.<br>
-      Powered by modern web technologies
-    </div>
+   <div class="footer-text">
+  © 2025 Philippine Nursing Students' Association. All rights reserved.<br>
+  Developed for RFID Attendance & Student Management
+</div>
+
   </div>
 
   <!-- ✅ External JS -->
   <script src="login.js"></script>
+  <script src="https://unpkg.com/bcryptjs@2.4.3/dist/bcrypt.min.js"></script>
 </body>
 </html>

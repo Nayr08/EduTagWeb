@@ -122,25 +122,28 @@
             position: relative;
         }
 
-        .input-wrapper i {
-            position: absolute;
-            left: 15px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #a0aec0;
-            font-size: 16px;
-        }
+      .input-wrapper i.fa-user,
+.input-wrapper i.fa-lock {
+    position: absolute;
+    left: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #a0aec0;
+    font-size: 16px;
+}
 
-        .form-control {
-            width: 100%;
-            padding: 15px 15px 15px 45px;
-            border: 2px solid #e2e8f0;
-            border-radius: 12px;
-            font-size: 16px;
-            background: #f8fafc;
-            transition: all 0.3s ease;
-            outline: none;
-        }
+
+       .form-control {
+    width: 100%;
+    padding: 15px 45px 15px 45px; /* ⬅ left for lock, right for eye */
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    font-size: 16px;
+    background: #f8fafc;
+    transition: all 0.3s ease;
+    outline: none;
+}
+
 
         .form-control:focus {
             border-color: #667eea;
