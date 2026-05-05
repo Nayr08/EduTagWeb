@@ -1,6 +1,6 @@
 {
   "projects": {
-    "default": "pnsa-web",
+    "default": "pnsa-pcds",
     "pnsa-pcds": "pnsa-pcds"
   },
   "targets": {},
