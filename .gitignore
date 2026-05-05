@@ -1,5 +1,8 @@
 # Dev-only utilities (never deploy)
 check-student.js
+TESTING_CHECKLIST.md
+mydatabase.md
+*.sql
 
 # Logs
 logs
