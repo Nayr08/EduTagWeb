@@ -3167,6 +3167,64 @@ function showNotification(message, type = "info") {
 let sanctionCurrentPage = 1;
 const sanctionRowsPerPage = 100;
 
+async function reconcileSanctionsForEvent(eventName) {
+  if (!eventName) return 0;
+
+  try {
+    const { data: event, error: eventError } = await supabaseClient
+      .from("event_info")
+      .select("idevent_info")
+      .eq("event_name", eventName)
+      .maybeSingle();
+
+    if (eventError) throw eventError;
+    if (!event?.idevent_info) return 0;
+
+    const { data: sanctions, error: sanctionError } = await supabaseClient
+      .from("sanctions")
+      .select("id, idstudent_info, penalty, status")
+      .eq("event_name", eventName)
+      .neq("status", "resolved");
+
+    if (sanctionError) throw sanctionError;
+    if (!sanctions?.length) return 0;
+
+    const { data: attendance, error: attendanceError } = await supabaseClient
+      .from("attendance")
+      .select("student_id, status")
+      .eq("event_id", event.idevent_info);
+
+    if (attendanceError) throw attendanceError;
+
+    const attendanceByStudent = new Map(
+      (attendance || []).map((record) => [String(record.student_id), record.status])
+    );
+
+    const staleSanctionIds = sanctions
+      .filter((sanction) => {
+        const attendanceStatus = attendanceByStudent.get(String(sanction.idstudent_info));
+        if (attendanceStatus === "present") return ["Late", "Absent"].includes(sanction.penalty);
+        if (attendanceStatus === "late") return sanction.penalty === "Absent";
+        return false;
+      })
+      .map((sanction) => sanction.id);
+
+    if (!staleSanctionIds.length) return 0;
+
+    const { error: deleteError } = await supabaseClient
+      .from("sanctions")
+      .delete()
+      .in("id", staleSanctionIds);
+
+    if (deleteError) throw deleteError;
+    console.log(`Reconciled ${staleSanctionIds.length} stale sanction(s) for ${eventName}.`);
+    return staleSanctionIds.length;
+  } catch (error) {
+    console.error("Failed to reconcile sanctions:", error);
+    return 0;
+  }
+}
+
 async function fetchSanctions(page = 1) {
   const loader = document.getElementById("sanctionLoading");
   if (loader) {
@@ -3205,6 +3263,8 @@ async function fetchSanctions(page = 1) {
       if (loader) loader.classList.remove("active");
       return;
     }
+
+    await reconcileSanctionsForEvent(eventName);
 
     while (true) {
       const { data, error } = await supabaseClient
