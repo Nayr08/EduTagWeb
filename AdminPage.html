@@ -53,6 +53,10 @@
             <i class="fas fa-exclamation-triangle"></i>
             <span>Sanctions</span>
           </a></li>
+        <li><a href="#" class="nav-link" data-section="superManual">
+            <i class="fas fa-user-check"></i>
+            <span>Super Manual Entry</span>
+          </a></li>
       </ul>
     </nav>
 
@@ -146,7 +150,7 @@
 
         <div class="stat-card">
           <div class="stat-card-header">
-            <div class="stat-card-title">Today's Attendance</div>
+            <div class="stat-card-title">Present</div>
             <div class="stat-card-icon" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
               <i class="fas fa-clipboard-check"></i>
             </div>
@@ -272,9 +276,11 @@
             <option value="">All Sections</option>
           </select>
 
-          <!-- Team Filter -->
-          <select class="form-control" id="teamFilter" style="width: auto;" onchange="filterAttendance()">
-            <option value="">All Teams</option>
+          <!-- Role Filter -->
+          <select class="form-control" id="attendanceRoleFilter" style="width: auto;" onchange="filterAttendance()">
+            <option value="">All Roles</option>
+            <option value="student">Students</option>
+            <option value="officer">Officers</option>
           </select>
 
           <!-- Event Filter -->
@@ -356,15 +362,12 @@
             <option value="">All Sections</option>
           </select>
 
-          <!-- Team Filter -->
-          <select class="form-control" id="studentTeamFilter" style="width: auto;" onchange="filterStudents()">
-            <option value="">All Teams</option>
+          <!-- Role Filter -->
+          <select class="form-control" id="studentRoleFilter" style="width: auto;" onchange="filterStudents()">
+            <option value="">All Roles</option>
+            <option value="student">Students</option>
+            <option value="officer">Officers</option>
           </select>
-
-          <!-- Check Teams Button -->
-          <button class="btn btn-info" onclick="openTeamModal()">
-            <i class="fas fa-users"></i> Check Teams
-          </button>
 
           <!-- Add Student Button -->
           <button class="btn btn-primary" onclick="openModal('addStudentModal')">
@@ -391,7 +394,7 @@
                 <th>Year Level</th>
                 <th>Section</th>
                 <th>Password</th>
-                <th>Team</th>
+                <th>Role</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -569,10 +572,11 @@
             <!-- Filled from student_info dynamically -->
           </select>
 
-          <!-- Team Filter -->
-          <select class="form-control" id="sanctionTeamFilter" style="width: auto;" onchange="fetchSanctions()">
-            <option value="">All Teams</option>
-            <!-- Filled from teams dynamically -->
+          <!-- Role Filter -->
+          <select class="form-control" id="sanctionRoleFilter" style="width: auto;" onchange="fetchSanctions()">
+            <option value="">All Roles</option>
+            <option value="student">Students</option>
+            <option value="officer">Officers</option>
           </select>
           <!-- Event filter for sanctions -->
           <select class="form-control" id="sanctionEventFilter" style="width: auto;" onchange="fetchSanctions()">
@@ -644,6 +648,89 @@
   </div>
     </div>
 
+    <!-- Super Manual Entry Section -->
+    <div class="content-section" id="superManual">
+      <div class="section-header">
+        <h2 class="section-title">Super Manual Entry</h2>
+        <div class="section-actions">
+          <div class="search-box">
+            <i class="fas fa-search"></i>
+            <input type="text" id="superManualSearchInput" placeholder="Search student ID or name">
+          </div>
+          <button class="btn btn-primary" onclick="searchSuperManualStudents()">
+            <i class="fas fa-search"></i> Search
+          </button>
+        </div>
+      </div>
+
+      <div class="table-container students-table">
+        <div id="superManualLoading" class="loading-overlay">
+          <div class="spinner"></div>
+          <p>Loading records...</p>
+        </div>
+        <div class="table-header-fixed">
+          <table>
+            <thead>
+              <tr>
+                <th>Student ID</th>
+                <th>Name</th>
+                <th>Year Level</th>
+                <th>Section</th>
+                <th>Role</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+          </table>
+        </div>
+        <div class="table-body-scroll">
+          <table>
+            <tbody id="superManualStudentResults">
+              <tr><td colspan="6">Search a student to begin.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="superManualDetails" style="display: none; margin-top: 20px;">
+        <div class="section-header">
+          <h3 class="section-title" id="superManualStudentTitle">Student Details</h3>
+          <div class="section-actions">
+            <select class="form-control" id="superManualRoleSelect" style="width: auto;">
+              <option value="student">Student</option>
+              <option value="officer">Officer</option>
+            </select>
+            <button class="btn btn-secondary" onclick="updateSuperManualRole()">
+              <i class="fas fa-user-cog"></i> Update Role
+            </button>
+          </div>
+        </div>
+
+        <div class="table-container attendance-table super-manual-records-table">
+          <div class="table-header-fixed">
+            <table>
+              <thead>
+                <tr>
+                  <th>Event</th>
+                  <th>Date</th>
+                  <th>Attendance</th>
+                  <th>Sanction</th>
+                  <th>Fee</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+            </table>
+          </div>
+          <div class="table-body-scroll">
+            <table>
+              <tbody id="superManualEventRows">
+                <tr><td colspan="6">Select a student to view event records.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
 
     <!-- Modals -->
 
@@ -701,9 +788,10 @@
             </div>
 
             <div class="form-group">
-              <label for="studentTeam">Team</label>
-              <select class="form-control" id="studentTeam" required>
-                <option value="">Select Team</option>
+              <label for="studentRole">Role</label>
+              <select class="form-control" id="studentRole" required>
+                <option value="student" selected>Student</option>
+                <option value="officer">Officer</option>
               </select>
             </div>
 
@@ -958,12 +1046,12 @@
             <!-- Hidden field for RFID reader in edit mode -->
             <input type="text" id="hiddenEditRfidInput" style="opacity:0; position:absolute; left:-9999px;" />
 
-            <!-- Team -->
+            <!-- Role -->
             <div class="form-group">
-              <label for="editStudentTeam">Team</label>
-              <select class="form-control" id="editStudentTeam" required>
-                <option value="">Select Team</option>
-                <!-- Dynamically filled -->
+              <label for="editStudentRole">Role</label>
+              <select class="form-control" id="editStudentRole" required>
+                <option value="student">Student</option>
+                <option value="officer">Officer</option>
               </select>
             </div>
 
@@ -1029,42 +1117,6 @@
         </div>
       </div>
     </div>
-
-    <!-- Team Management Modal -->
-    <div class="modal" id="teamModal">
-      <div class="modal-content">
-        <!-- Header -->
-        <div class="modal-header">
-          <h3>Team Management</h3>
-          <button class="modal-close" onclick="closeModal('teamModal')">&times;</button>
-        </div>
-
-        <!-- Body -->
-        <div class="modal-body">
-          <div class="team-actions">
-            <input type="text" class="form-control" id="teamNameInput" placeholder="Team Name">
-            <button class="btn btn-primary" onclick="addTeam()">Add Team</button>
-          </div>
-
-          <h4>Teams List</h4>
-          <div class="table-wrapper">
-            <table class="table" id="teamsTableSmall">
-              <thead>
-                <tr>
-                  <th>Team Name</th>
-                  <th class="actions-col">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="teamsTable"></tbody>
-            </table>
-
-          </div>
-        </div>
-      </div>
-    </div>
-
-
-
 
     <!-- Edit Event Modal -->
     <div class="modal" id="editEventModal">
@@ -1145,11 +1197,10 @@
     <div class="modal" id="sanctionPasswordModal">
       <div class="modal-content">
         <div class="modal-header">
-          <h3>Sanctions Panel Access</h3>
+          <h3>Protected Tools Access</h3>
         </div>
         <div class="modal-body">
-          <p style="margin-bottom: 15px;">This section contains sensitive financial information. Please enter the
-            sanctions password to continue.</p>
+          <p style="margin-bottom: 15px;">This area contains sensitive sanction and correction tools. Please enter your admin password to continue.</p>
           <form id="sanctionPasswordForm" onsubmit="verifySanctionPassword(event)">
             <!-- Hidden username field for password managers -->
             <input type="text" autocomplete="username" style="display:none;" aria-hidden="true">
@@ -1171,6 +1222,28 @@
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="cancelSanctionAccess()">Cancel</button>
           <button class="btn btn-primary" type="submit" form="sanctionPasswordForm">Verify</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Super Manual Confirmation Modal -->
+    <div class="modal" id="superManualConfirmModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Confirm Manual Correction</h3>
+          <button class="modal-close" onclick="closeSuperManualConfirmModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="superManualConfirmMessage" style="margin-bottom: 10px;">
+            Confirm this attendance correction?
+          </p>
+          <p style="font-size: 13px; color: #718096;">
+            This will update only the selected event and reconcile the matching sanction.
+          </p>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button class="btn btn-secondary" onclick="closeSuperManualConfirmModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="confirmSuperManualAttendanceUpdate()">Confirm</button>
         </div>
       </div>
     </div>

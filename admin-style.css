@@ -1966,3 +1966,185 @@ body {
 .logout-modal-buttons .btn-logout:hover {
   background-color: #d32f2f;
 }
+
+/* Compact admin density: closer to the useful 75% browser-zoom view at native 100%. */
+body {
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.sidebar {
+  width: 222px;
+  padding: 16px;
+}
+
+.sidebar-header {
+  margin-bottom: 22px;
+  padding-bottom: 16px;
+}
+
+.sidebar-brand h2,
+.sidebar-brand h3 {
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.sidebar-nav a {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.sidebar-footer {
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+}
+
+.admin-info {
+  padding: 12px;
+}
+
+.main-content {
+  margin-left: 222px;
+  padding: 16px 18px;
+}
+
+.top-header {
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  border-radius: 10px;
+}
+
+.page-title {
+  font-size: 23px;
+}
+
+.content-section {
+  padding: 18px 22px;
+  margin-bottom: 20px;
+  border-radius: 10px;
+}
+
+.section-header {
+  margin-bottom: 18px;
+  padding-bottom: 12px;
+  gap: 10px;
+}
+
+.section-title {
+  font-size: 19px;
+}
+
+.stat-grid {
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.stat-card {
+  padding: 18px;
+  border-radius: 10px;
+}
+
+.stat-card-icon {
+  width: 42px;
+  height: 42px;
+  font-size: 20px;
+}
+
+.btn {
+  padding: 8px 14px;
+  border-radius: 7px;
+  font-size: 13px;
+  gap: 6px;
+}
+
+.form-control,
+.search-box input,
+.input-field {
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 7px;
+}
+
+.search-box input {
+  padding-left: 34px;
+}
+
+.search-box {
+  min-width: 210px;
+}
+
+.table-container,
+.table-container-fixed {
+  border-radius: 8px;
+}
+
+.table th,
+.table td,
+.table-header-fixed th,
+.table-body-scroll td {
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
+.table-body-scroll {
+  max-height: 460px;
+}
+
+.students-table .table-header-fixed th,
+.students-table .table-body-scroll td,
+.events-table .table-header-fixed th,
+.events-table .table-body-scroll td {
+  padding: 9px 10px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+}
+
+.status-badge {
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+.modal-content {
+  padding: 18px;
+  border-radius: 10px;
+}
+
+.super-manual-records-table .table-header-fixed th:nth-child(1),
+.super-manual-records-table .table-body-scroll td:nth-child(1) {
+  width: 30%;
+}
+
+.super-manual-records-table .table-header-fixed th:nth-child(2),
+.super-manual-records-table .table-body-scroll td:nth-child(2) {
+  width: 13%;
+}
+
+.super-manual-records-table .table-header-fixed th:nth-child(3),
+.super-manual-records-table .table-body-scroll td:nth-child(3) {
+  width: 17%;
+  text-align: center;
+}
+
+.super-manual-records-table .table-header-fixed th:nth-child(4),
+.super-manual-records-table .table-body-scroll td:nth-child(4) {
+  width: 18%;
+  text-align: center;
+}
+
+.super-manual-records-table .table-header-fixed th:nth-child(5),
+.super-manual-records-table .table-body-scroll td:nth-child(5) {
+  width: 10%;
+  text-align: center;
+}
+
+.super-manual-records-table .table-header-fixed th:nth-child(6),
+.super-manual-records-table .table-body-scroll td:nth-child(6) {
+  width: 12%;
+  text-align: center;
+}
+
+.super-manual-records-table .table-body-scroll td:last-child {
+  text-align: center;
+}

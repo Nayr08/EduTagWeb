@@ -8,9 +8,21 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 
 // ✅ Global variable to track sanction access permission
 let sanctionAccessGranted = false;
+let pendingProtectedSection = "sanctions";
+let selectedSuperManualStudent = null;
+let superManualEventsCache = [];
+let pendingSuperManualAttendanceUpdate = null;
 let isRedirectingToLogin = false;
 const FORCE_LOGOUT_VERSION_KEY = "force_logout_version";
 const LOCAL_FORCE_LOGOUT_VERSION_KEY = "edutag_force_logout_version";
+
+function normalizeStudentRole(role) {
+  return role === "officer" ? "officer" : "student";
+}
+
+function formatStudentRole(role) {
+  return normalizeStudentRole(role) === "officer" ? "Officer" : "Student";
+}
 
 function clearSupabaseAuthStorage() {
   const prefix = `sb-${SUPABASE_PROJECT_REF}-`;
@@ -691,48 +703,17 @@ function changeStudentsPage(direction) {
   // ✅ Get current filter values
   const yearLevel = document.getElementById("studentYearFilter")?.value || "";
   const section = document.getElementById("studentSectionFilter")?.value || "";
-  const teamName = document.getElementById("studentTeamFilter")?.value || "";
+  const role = document.getElementById("studentRoleFilter")?.value || "";
   const searchValue = document.getElementById("searchInput")?.value?.trim().toLowerCase() || "";
 
   // ✅ Pass all filters explicitly when paginating
-  filterStudents(newPage, yearLevel, section, teamName, searchValue);
+  filterStudents(newPage, yearLevel, section, role, searchValue);
 }
 
 
 
 
 
-
-function populateSectionAndTeamFilters(data) {
-  const sectionFilter = document.getElementById("sectionFilter");
-  const teamFilter = document.getElementById("teamFilter");
-
-  if (!sectionFilter || !teamFilter) return; // if not on the page, skip
-
-  // Get unique values
-  const uniqueSections = [...new Set(data.map(s => s.section).filter(Boolean))].sort();
-  const uniqueTeams = [...new Set(data.map(s => s.teams ? s.teams.team_name : null).filter(Boolean))].sort();
-
-  // Reset dropdowns
-  sectionFilter.innerHTML = `<option value="">All Sections</option>`;
-  teamFilter.innerHTML = `<option value="">All Teams</option>`;
-
-  // Populate sections
-  uniqueSections.forEach(section => {
-    const opt = document.createElement("option");
-    opt.value = section;
-    opt.textContent = section;
-    sectionFilter.appendChild(opt);
-  });
-
-  // Populate teams
-  uniqueTeams.forEach(team => {
-    const opt = document.createElement("option");
-    opt.value = team;
-    opt.textContent = team;
-    teamFilter.appendChild(opt);
-  });
-}
 
 async function filterAttendance(page = 1) {
   const loader = document.getElementById("attendanceLoading");
@@ -745,7 +726,7 @@ async function filterAttendance(page = 1) {
     const yearLevel = document.getElementById("attendanceYearFilter")?.value || "";
     const eventId = document.getElementById("eventFilter")?.value || "";
     const section = document.getElementById("sectionFilter")?.value || "";
-    const teamId = document.getElementById("teamFilter")?.value || "";
+    const role = document.getElementById("attendanceRoleFilter")?.value || "";
     const searchValue = document.getElementById("searchInput")?.value?.trim().toLowerCase() || "";
     const title = document.getElementById("attendanceTitle");
 
@@ -803,7 +784,7 @@ async function filterAttendance(page = 1) {
           date,
           scan_time,
           status,
-          student_info (student_id, name, section, team_id, year_level),
+          student_info (student_id, name, section, role, year_level),
           event_info (event_name, idevent_info)
         `)
         .eq("event_id", eventId)
@@ -836,10 +817,10 @@ async function filterAttendance(page = 1) {
       });
     }
 
-    if (teamId) {
+    if (role) {
       filtered = filtered.filter(att => {
-        const t = att.student_info?.team_id ?? "";
-        return String(t) === String(teamId);
+        const studentRole = normalizeStudentRole(att.student_info?.role);
+        return studentRole === role;
       });
     }
 
@@ -920,7 +901,7 @@ async function filterStudents(page = 1) {
 
   const yearLevel = document.getElementById("studentYearFilter")?.value || "";
   const section = document.getElementById("studentSectionFilter")?.value || "";
-  const teamId = document.getElementById("studentTeamFilter")?.value || "";
+  const role = document.getElementById("studentRoleFilter")?.value || "";
   const searchValue = document.getElementById("searchInput")?.value?.trim().toLowerCase() || "";
 
   const start = (page - 1) * studentsRowsPerPage;
@@ -938,15 +919,14 @@ async function filterStudents(page = 1) {
         password,
         rfid,
         status,
-        team_id,
-        teams (team_name)
+        role
       `, { count: "exact" })
       .order("name", { ascending: true })
       .range(start, end);
 
     if (yearLevel) query = query.eq("year_level", yearLevel);
     if (section) query = query.eq("section", section);
-    if (teamId) query = query.eq("team_id", teamId);
+    if (role) query = query.eq("role", role);
     if (searchValue) query = query.or(`name.ilike.%${searchValue}%,student_id.ilike.%${searchValue}%`);
 
     const { data, error, count } = await query;
@@ -1161,10 +1141,10 @@ async function addStudent() {
   const studentYear = document.getElementById("studentYear").value;
   const studentPassword = document.getElementById("studentPassword").value.trim();
   const studentRfid = document.getElementById("studentRfid").value.trim();
-  const studentTeam = document.getElementById("studentTeam").value;
+  const studentRole = normalizeStudentRole(document.getElementById("studentRole")?.value);
   const studentSection = document.getElementById("studentSection").value.trim();
 
-  if (!studentId || !studentName || !studentPassword || !studentRfid || !studentYear || !studentSection || !studentTeam) {
+  if (!studentId || !studentName || !studentPassword || !studentRfid || !studentYear || !studentSection || !studentRole) {
     showNotification("Please fill in all required fields.", "warning");
     return;
   }
@@ -1177,7 +1157,7 @@ async function addStudent() {
       section: studentSection,
       password: studentPassword,
       rfid: studentRfid,
-      team_id: studentTeam,
+      role: studentRole,
       status: "active"
     }
   ]);
@@ -1195,58 +1175,6 @@ async function addStudent() {
 }
 
 
-
-
-// Load teams into edit modal
-async function loadEditStudentTeams(selectedTeamId = null) {
-  const { data, error } = await supabaseClient
-    .from("teams")
-    .select("idteam, team_name")
-    .order("team_name", { ascending: true });
-
-  if (error) {
-    console.error("❌ Error loading teams:", error);
-    return;
-  }
-
-  const dropdown = document.getElementById("editStudentTeam");
-  dropdown.innerHTML = `<option value="">Select Team</option>`;
-  data.forEach(team => {
-    dropdown.innerHTML += `<option value="${team.idteam}">${escapeHTML(team.team_name)}</option>`;
-  });
-
-  // Preselect student's team if available
-  if (selectedTeamId) {
-    dropdown.value = selectedTeamId;
-  }
-}
-
-// Load teams into a <select> by element id
-async function loadTeams(selectId) {
-  const { data, error } = await supabaseClient
-    .from("teams")
-    .select("idteam, team_name")
-    .order("team_name", { ascending: true });
-
-  if (error) {
-    console.error("❌ Error loading teams:", error);
-    return;
-  }
-
-  const dropdown = document.getElementById(selectId);
-  if (!dropdown) return;
-
-  dropdown.innerHTML = `<option value="">${selectId === "studentTeam" ? "Select Team" : "All Teams"}</option>`;
-
-  data.forEach((team) => {
-    dropdown.innerHTML += `<option value="${team.idteam}">${escapeHTML(team.team_name)}</option>`;
-  });
-}
-
-
-
-// Run on page load
-document.addEventListener("DOMContentLoaded", loadTeams);
 
 
 // -------------------- EVENTS --------------------
@@ -1768,17 +1696,13 @@ if (rfidInputElement) {
 async function exportSanctionsCSV() {
   const eventName = document.getElementById("sanctionEventFilter")?.value || "";
   const section = document.getElementById("sanctionSectionFilter")?.value || "";
-  const teamId = document.getElementById("sanctionTeamFilter")?.value || "";
+  const role = document.getElementById("sanctionRoleFilter")?.value || "";
   const yearLevel = document.getElementById("sanctionYearFilter")?.value || "";
   const showResolved = document.getElementById("showResolvedCheckbox")?.checked || false;
 
   try {
-    // ✅ Get readable team name for filename (not just ID)
-    const teamSelect = document.getElementById("sanctionTeamFilter");
-    const teamName =
-      teamSelect && teamSelect.selectedIndex > 0
-        ? teamSelect.options[teamSelect.selectedIndex].text
-        : "";
+    // ✅ Get readable role name for filename (not just ID)
+    const roleName = role ? formatStudentRole(role) : "";
 
     // ✅ Fetch ALL sanctions data in batches (bypasses 1000 limit)
     let allData = [];
@@ -1794,7 +1718,7 @@ async function exportSanctionsCSV() {
             name,
             year_level,
             section,
-            team_id
+            role
           ),
           event_name,
           penalty,
@@ -1842,8 +1766,8 @@ async function exportSanctionsCSV() {
       filtered = filtered.filter(s => s.student_info?.section === section);
     }
 
-    if (teamId) {
-      filtered = filtered.filter(s => String(s.student_info?.team_id) === String(teamId));
+    if (role) {
+      filtered = filtered.filter(s => normalizeStudentRole(s.student_info?.role) === role);
     }
 
     if (!filtered.length) {
@@ -1877,12 +1801,12 @@ async function exportSanctionsCSV() {
         `"${row.status ?? "-"}"\n`;
     });
 
-    // ✅ Build filename (include year level & team name)
+    // ✅ Build filename (include year level & role)
     const dateStr = new Date().toISOString().split("T")[0];
     let fileName = "Sanctions";
     fileName += eventName ? `-${eventName}` : "-AllEvents";
     fileName += yearLevel ? `-${yearLevel}` : "-AllYears";
-    fileName += teamName ? `-${teamName}` : "-AllTeams";
+    fileName += roleName ? `-${roleName}` : "-AllRoles";
     fileName += section ? `-Section${section}` : "-AllSections";
     fileName += `-${dateStr}`;
 
@@ -2575,6 +2499,7 @@ async function autoFixMissingAbsentees() {
           const { data, error } = await supabaseClient
             .from("student_info")
             .select("idstudent_info")
+            .eq("role", "student")
             .range(from, from + batchSize - 1);
 
           if (error) throw error;
@@ -2668,6 +2593,7 @@ async function markAbsenteesWithRetry(event) {
       const { data, error } = await supabaseClient
         .from("student_info")
         .select("idstudent_info, student_id, name")
+        .eq("role", "student")
         .range(from, from + batchSize - 1);
 
       if (error) throw error;
@@ -2810,7 +2736,7 @@ async function editStudent(id) {
   // Fetch student
   const { data: student, error } = await supabaseClient
     .from("student_info")
-    .select("idstudent_info, student_id, name, rfid, year_level, section, team_id, password")
+    .select("idstudent_info, student_id, name, rfid, year_level, section, role, password")
     .eq("idstudent_info", id)
     .single();
 
@@ -2828,9 +2754,7 @@ async function editStudent(id) {
   document.getElementById("editStudentYear").value = student.year_level || "";
   document.getElementById("editStudentSection").value = student.section || "";
   document.getElementById("editStudentPassword").value = student.password || "";
-
-  // Load teams into dropdown and preselect student's team
-  await loadEditStudentTeams(student.team_id);
+  document.getElementById("editStudentRole").value = normalizeStudentRole(student.role);
 
   // Finally, open modal
   openModal("editStudentModal");
@@ -2843,10 +2767,10 @@ function getStudentEditFormValues() {
   const rfidField = document.getElementById("editStudentRfid");
   const yearField = document.getElementById("editStudentYear");
   const sectionField = document.getElementById("editStudentSection");
-  const teamField = document.getElementById("editStudentTeam");
+  const roleField = document.getElementById("editStudentRole");
   const passField = document.getElementById("editStudentPassword");
 
-  if (!idField || !schoolIdField || !nameField || !rfidField || !yearField || !sectionField || !teamField || !passField) {
+  if (!idField || !schoolIdField || !nameField || !rfidField || !yearField || !sectionField || !roleField || !passField) {
     console.error("One or more editStudent fields not found in DOM");
     showNotification("Form error: some fields are missing. Check your modal HTML IDs.", "error");
     return null;
@@ -2858,15 +2782,15 @@ function getStudentEditFormValues() {
   const rfid = rfidField.value.trim();
   const year = yearField.value;
   const section = sectionField.value.trim();
-  const teamId = teamField.value;
+  const role = normalizeStudentRole(roleField.value);
   const password = passField.value;
 
-  if (!id || !schoolId || !name || !rfid || !year || !section || !teamId || !password) {
+  if (!id || !schoolId || !name || !rfid || !year || !section || !role || !password) {
     showNotification("Please fill in all fields.", "warning");
     return null;
   }
 
-  return { id, schoolId, name, rfid, year, section, teamId, password };
+  return { id, schoolId, name, rfid, year, section, role, password };
 }
 
 function openStudentEditConfirm() {
@@ -2893,7 +2817,7 @@ async function saveStudentEdit() {
     return;
   }
 
-  const { id, schoolId, name, rfid, year, section, teamId, password } = values;
+  const { id, schoolId, name, rfid, year, section, role, password } = values;
 
   try {
     const { error } = await supabaseClient
@@ -2904,7 +2828,7 @@ async function saveStudentEdit() {
         rfid,
         year_level: year,
         section: section,
-        team_id: teamId,
+        role,
         password,
       })
       .eq("idstudent_info", id);
@@ -2920,26 +2844,6 @@ async function saveStudentEdit() {
   }
 }
 
-async function loadTeamsIntoEditModal(selectedTeamId) {
-  const { data: teams, error } = await supabaseClient
-    .from('teams')
-    .select('*')
-    .order('idteam', { ascending: true });
-
-  if (error) return console.error(error);
-
-  const teamSelect = document.getElementById('editStudentTeam');
-  teamSelect.innerHTML = '<option value="">Select Team</option>';
-
-  teams.forEach(team => {
-    const option = document.createElement('option');
-    option.value = team.idteam; // ✅ store ID
-    option.textContent = team.team_name; // display name
-    if (team.idteam === selectedTeamId) option.selected = true;
-    teamSelect.appendChild(option);
-  });
-}
-
 function openEditStudentModal(student) {
   document.getElementById("editStudentId").value = student.idstudent_info;
   document.getElementById("editStudentName").value = student.name;
@@ -2947,8 +2851,7 @@ function openEditStudentModal(student) {
   document.getElementById("editStudentYear").value = student.year_level;
   document.getElementById("editStudentSection").value = student.section;
   document.getElementById("editStudentPassword").value = student.password;
-
-  loadTeamsIntoEditModal(student.team_id); // ✅ load teams with proper ID
+  document.getElementById("editStudentRole").value = normalizeStudentRole(student.role);
 
   openModal('editStudentModal');
 }
@@ -2971,9 +2874,10 @@ function openModal(modalId) {
   modalEl.style.display = 'flex';
   modalEl.setAttribute('aria-hidden', 'false');
 
-  // Load teams when opening add student modal
+  // Keep new student default as student unless admin selects officer.
   if (modalId === 'addStudentModal') {
-    loadTeams('studentTeam');
+    const roleSelect = document.getElementById("studentRole");
+    if (roleSelect) roleSelect.value = "student";
   }
 }
 function closeModal(modalId) {
@@ -2988,92 +2892,6 @@ function closeModal(modalId) {
   modalEl.setAttribute('aria-hidden', 'true');
 }
 
-// Open Team Modal and load teams
-function openTeamModal() {
-  openModal('teamModal');
-  renderTeams();
-}
-
-// Render teams from Supabase
-async function renderTeams() {
-  const { data: teams, error } = await supabaseClient
-    .from('teams')
-    .select('*')
-    .order('idteam', { ascending: true }); // primary key
-
-  if (error) {
-    console.error('Error fetching teams:', error);
-    return;
-  }
-
-  const table = document.getElementById('teamsTable');
-  table.innerHTML = '';
-
-  teams.forEach(team => {
-    const row = document.createElement('tr');
-    row.innerHTML = `
-      <td>${escapeHTML(team.team_name)}</td>
-      <td>
-        <button class="btn btn-danger" onclick="removeTeam(${team.idteam})">
-          <i class="fas fa-trash"></i> Remove
-        </button>
-      </td>
-    `;
-    table.appendChild(row);
-  });
-}
-
-// Add a new team
-async function addTeam() {
-  const teamName = document.getElementById('teamNameInput').value.trim();
-  if (!teamName) {
-    showNotification("Team name cannot be empty!", "warning");
-    return;
-  }
-
-  // Insert into Supabase
-  const { data, error } = await supabaseClient
-    .from('teams')
-    .insert([{ team_name: teamName }]); // use actual column name
-
-  if (error) {
-    showNotification('Error adding team: ' + error.message, "error");
-    return;
-  }
-
-  document.getElementById('teamNameInput').value = '';
-  showNotification("Team added successfully!", "success");
-  renderTeams();
-}
-
-// Remove a team
-async function removeTeam(idteam) {
-  if (!confirm("Are you sure you want to delete this team?")) return;
-
-  const { error } = await supabaseClient
-    .from('teams')
-    .delete()
-    .eq('idteam', idteam); // primary key
-
-  if (error) {
-    showNotification('Error deleting team: ' + error.message, "error");
-    return;
-  }
-
-  showNotification("Team deleted successfully!", "success");
-  renderTeams();
-}
-
-// Close modal when clicking outside
-window.onclick = function (event) {
-  const modal = document.getElementById('teamModal');
-  if (event.target == modal) closeModal('teamModal');
-};
-
-
-
-
-// ✅ Save event edits
 async function saveEventEdit() {
   const id = document.getElementById("editEventId").value;
   const eventName = document.getElementById("editEventName").value;
@@ -3237,7 +3055,7 @@ async function fetchSanctions(page = 1) {
     const showResolved = document.getElementById("showResolvedCheckbox")?.checked || false;
     const eventName = document.getElementById("sanctionEventFilter")?.value || "";
     const section = document.getElementById("sanctionSectionFilter")?.value || "";
-    const teamId = document.getElementById("sanctionTeamFilter")?.value || "";
+    const role = document.getElementById("sanctionRoleFilter")?.value || "";
     const yearLevel = document.getElementById("sanctionYearFilter")?.value || "";
 
     // 🔍 ADDED: Get search query
@@ -3275,7 +3093,7 @@ async function fetchSanctions(page = 1) {
             name,
             year_level,
             section,
-            team_id
+            role
           ),
           event_name,
           penalty,
@@ -3306,7 +3124,7 @@ async function fetchSanctions(page = 1) {
     if (!showResolved) filtered = filtered.filter((s) => s.status !== "resolved");
     if (yearLevel) filtered = filtered.filter((s) => String(s.student_info?.year_level) === String(yearLevel));
     if (section) filtered = filtered.filter((s) => s.student_info?.section === section);
-    if (teamId) filtered = filtered.filter((s) => String(s.student_info?.team_id) === String(teamId));
+    if (role) filtered = filtered.filter((s) => normalizeStudentRole(s.student_info?.role) === role);
 
     // 🔍 ADDED: Global search across all pages
     if (searchQuery) {
@@ -3566,9 +3384,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     fetchSanctions(),
     loadSections(),
     loadYearLevelsForSanctions(),
-    loadTeamsForStudents(),
     loadSectionsForSanctions(),      // ✅ ADD THIS
-    loadTeamsForSanctions(),          // ✅ ADD THIS
     loadSanctionEventFilter(),        // ✅ ADD THIS
     loadDashboardEvents(),            // ✅ ADD THIS (for dashboard)
     loadYearLevels(),
@@ -3699,35 +3515,42 @@ function showNotification(message, type = "info") {
   }, 4000);
 }
 
+function activateAdminSection(section) {
+  document.querySelectorAll(".nav-link").forEach(l => l.classList.remove("active"));
+  const activeLink = document.querySelector(`[data-section="${section}"]`);
+  if (activeLink) activeLink.classList.add("active");
+
+  document.querySelectorAll(".content-section").forEach(s => s.classList.remove("active"));
+  const activeSection = document.getElementById(section);
+  if (activeSection) activeSection.classList.add("active");
+
+  const titles = {
+    dashboard: "Dashboard",
+    attendance: "Attendance",
+    students: "Students",
+    events: "Events",
+    sanctions: "Sanctions",
+    superManual: "Super Manual Entry"
+  };
+  document.getElementById("pageTitle").textContent = titles[section] || "Dashboard";
+}
+
 // Update your nav-link click handler
 document.querySelectorAll(".nav-link").forEach(link => {
   link.addEventListener("click", async (e) => {
     const section = link.dataset.section;
 
-    // Check if trying to access sanctions
-    if (section === "sanctions" && !sanctionAccessGranted) {
+    // Check if trying to access protected correction tools
+    if ((section === "sanctions" || section === "superManual") && !sanctionAccessGranted) {
       e.preventDefault(); // Prevent navigation
+      pendingProtectedSection = section;
       openModal("sanctionPasswordModal");
       document.getElementById("sanctionPasswordInput").focus();
       return;
     }
 
     // Normal navigation for other sections or if access already granted
-    document.querySelectorAll(".nav-link").forEach(l => l.classList.remove("active"));
-    link.classList.add("active");
-
-    document.querySelectorAll(".content-section").forEach(s => s.classList.remove("active"));
-    document.getElementById(section).classList.add("active");
-
-    // Update page title
-    const titles = {
-      dashboard: "Dashboard",
-      attendance: "Attendance",
-      students: "Students",
-      events: "Events",
-      sanctions: "Sanctions"
-    };
-    document.getElementById("pageTitle").textContent = titles[section] || "Dashboard";
+    activateAdminSection(section);
 
     // Reset search
     const searchInput = document.getElementById("searchInput");
@@ -3892,8 +3715,352 @@ async function addManualAttendance() {
 
 
 // ✅ Init when page loads
+function normalizeEventNameForMatch(eventName) {
+  return String(eventName || "").replace(/\s+/g, " ").trim();
+}
+
+function getPhilippinesDateTimeParts() {
+  const now = new Date();
+  const dateParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const dateMap = Object.fromEntries(dateParts.map((part) => [part.type, part.value]));
+  const date = `${dateMap.year}-${dateMap.month}-${dateMap.day}`;
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Manila",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(now);
+
+  return { date, time };
+}
+
+async function searchSuperManualStudents() {
+  const query = document.getElementById("superManualSearchInput")?.value.trim() || "";
+  const table = document.getElementById("superManualStudentResults");
+  const loader = document.getElementById("superManualLoading");
+
+  if (!table) return;
+  if (query.length < 2) {
+    table.innerHTML = `<tr><td colspan="6">Type at least 2 characters to search.</td></tr>`;
+    return;
+  }
+
+  if (loader) {
+    loader.classList.add("active");
+    await new Promise(requestAnimationFrame);
+  }
+
+  try {
+    const columns = "idstudent_info, student_id, name, year_level, section, role, status";
+    const [idResult, nameResult] = await Promise.all([
+      supabaseClient.from("student_info").select(columns).ilike("student_id", `%${query}%`).limit(10),
+      supabaseClient.from("student_info").select(columns).ilike("name", `%${query}%`).limit(10),
+    ]);
+
+    if (idResult.error) throw idResult.error;
+    if (nameResult.error) throw nameResult.error;
+
+    const studentsById = new Map();
+    [...(idResult.data || []), ...(nameResult.data || [])].forEach((student) => {
+      studentsById.set(student.idstudent_info, student);
+    });
+
+    const students = [...studentsById.values()]
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+      .slice(0, 20);
+
+    if (!students.length) {
+      table.innerHTML = `<tr><td colspan="6">No students found.</td></tr>`;
+      return;
+    }
+
+    table.innerHTML = students.map((student) => `
+      <tr>
+        <td>${escapeHTML(student.student_id || "-")}</td>
+        <td>${escapeHTML(student.name || "-")}</td>
+        <td>${escapeHTML(student.year_level || "-")}</td>
+        <td>${escapeHTML(student.section || "-")}</td>
+        <td>${escapeHTML(formatStudentRole(student.role))}</td>
+        <td>
+          <button class="btn btn-primary" onclick="selectSuperManualStudent(${student.idstudent_info})">
+            View Records
+          </button>
+        </td>
+      </tr>
+    `).join("");
+  } catch (err) {
+    console.error("Super manual search failed:", err);
+    table.innerHTML = `<tr><td colspan="6">Search failed. Check console.</td></tr>`;
+  } finally {
+    if (loader) loader.classList.remove("active");
+  }
+}
+
+async function selectSuperManualStudent(studentId) {
+  const loader = document.getElementById("superManualLoading");
+  if (loader) {
+    loader.classList.add("active");
+    await new Promise(requestAnimationFrame);
+  }
+
+  try {
+    const { data: student, error } = await supabaseClient
+      .from("student_info")
+      .select("idstudent_info, student_id, name, year_level, section, role")
+      .eq("idstudent_info", studentId)
+      .single();
+
+    if (error || !student) throw error || new Error("Student not found");
+
+    selectedSuperManualStudent = student;
+    document.getElementById("superManualDetails").style.display = "block";
+    document.getElementById("superManualStudentTitle").textContent =
+      `${student.name} (${student.student_id})`;
+    document.getElementById("superManualRoleSelect").value = normalizeStudentRole(student.role);
+
+    await loadSuperManualEventRecords();
+  } catch (err) {
+    console.error("Failed to load student records:", err);
+    showNotification("Failed to load student records.", "error");
+  } finally {
+    if (loader) loader.classList.remove("active");
+  }
+}
+
+async function loadSuperManualEventRecords() {
+  if (!selectedSuperManualStudent) return;
+
+  const table = document.getElementById("superManualEventRows");
+  if (!table) return;
+
+  table.innerHTML = `<tr><td colspan="6">Loading event records...</td></tr>`;
+
+  try {
+    const [eventsResult, attendanceResult, sanctionsResult] = await Promise.all([
+      supabaseClient.from("event_info").select("idevent_info, event_name, date").order("date", { ascending: false }),
+      supabaseClient.from("attendance").select("idattendance, event_id, status, scan_time, date").eq("student_id", selectedSuperManualStudent.idstudent_info),
+      supabaseClient.from("sanctions").select("id, event_name, penalty, fee, status, date_given").eq("idstudent_info", selectedSuperManualStudent.idstudent_info),
+    ]);
+
+    if (eventsResult.error) throw eventsResult.error;
+    if (attendanceResult.error) throw attendanceResult.error;
+    if (sanctionsResult.error) throw sanctionsResult.error;
+
+    superManualEventsCache = eventsResult.data || [];
+    const attendanceByEvent = new Map((attendanceResult.data || []).map((row) => [Number(row.event_id), row]));
+    const sanctionsByEventName = new Map();
+
+    (sanctionsResult.data || []).forEach((sanction) => {
+      const key = normalizeEventNameForMatch(sanction.event_name);
+      const existing = sanctionsByEventName.get(key);
+      if (!existing || existing.status === "resolved") sanctionsByEventName.set(key, sanction);
+    });
+
+    if (!superManualEventsCache.length) {
+      table.innerHTML = `<tr><td colspan="6">No events found.</td></tr>`;
+      return;
+    }
+
+    table.innerHTML = superManualEventsCache.map((event) => {
+      const attendance = attendanceByEvent.get(Number(event.idevent_info));
+      const sanction = sanctionsByEventName.get(normalizeEventNameForMatch(event.event_name));
+      const attendanceStatus = attendance?.status || "missing";
+      const sanctionText = sanction ? `${sanction.penalty || "-"} (${sanction.status || "pending"})` : "-";
+      const feeText = sanction?.fee ? `₱${Number(sanction.fee).toLocaleString()}` : "-";
+
+      return `
+        <tr>
+          <td>${escapeHTML(event.event_name || "-")}</td>
+          <td>${escapeHTML(event.date || "-")}</td>
+          <td><span class="status-badge ${escapeHTML(attendanceStatus)}">${escapeHTML(attendanceStatus.toUpperCase())}</span></td>
+          <td>${escapeHTML(sanctionText)}</td>
+          <td>${feeText}</td>
+          <td>
+            <button class="btn btn-primary" onclick="updateSuperManualAttendance(${event.idevent_info}, 'present')">Present</button>
+            <button class="btn btn-secondary" onclick="updateSuperManualAttendance(${event.idevent_info}, 'late')">Late</button>
+            <button class="btn btn-danger" onclick="updateSuperManualAttendance(${event.idevent_info}, 'absent')">Absent</button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  } catch (err) {
+    console.error("Failed to load super manual event records:", err);
+    table.innerHTML = `<tr><td colspan="6">Failed to load event records.</td></tr>`;
+  }
+}
+
+async function updateSuperManualRole() {
+  if (!selectedSuperManualStudent) {
+    showNotification("Select a student first.", "warning");
+    return;
+  }
+
+  const nextRole = normalizeStudentRole(document.getElementById("superManualRoleSelect")?.value);
+  const { error } = await supabaseClient
+    .from("student_info")
+    .update({ role: nextRole })
+    .eq("idstudent_info", selectedSuperManualStudent.idstudent_info);
+
+  if (error) {
+    console.error("Failed to update student role:", error);
+    showNotification("Failed to update role.", "error");
+    return;
+  }
+
+  selectedSuperManualStudent.role = nextRole;
+  showNotification(`Role updated to ${formatStudentRole(nextRole)}.`, "success");
+  searchSuperManualStudents();
+  loadStudents();
+}
+
+async function updateSuperManualAttendance(eventId, status) {
+  if (!selectedSuperManualStudent) {
+    showNotification("Select a student first.", "warning");
+    return;
+  }
+
+  const allowedStatuses = ["present", "late", "absent"];
+  if (!allowedStatuses.includes(status)) return;
+
+  const event = superManualEventsCache.find((item) => Number(item.idevent_info) === Number(eventId));
+  if (!event) {
+    showNotification("Event not found. Reload the student details.", "error");
+    return;
+  }
+
+  const label = status === "present" ? "Present" : status === "late" ? "Late" : "Absent";
+  pendingSuperManualAttendanceUpdate = { eventId: Number(eventId), status };
+  const message = document.getElementById("superManualConfirmMessage");
+  if (message) {
+    message.textContent = `Mark ${selectedSuperManualStudent.name} (${selectedSuperManualStudent.student_id}) as ${label} for "${event.event_name}"?`;
+  }
+  openModal("superManualConfirmModal");
+}
+
+function closeSuperManualConfirmModal() {
+  pendingSuperManualAttendanceUpdate = null;
+  closeModal("superManualConfirmModal");
+}
+
+async function confirmSuperManualAttendanceUpdate() {
+  if (!pendingSuperManualAttendanceUpdate || !selectedSuperManualStudent) {
+    closeSuperManualConfirmModal();
+    return;
+  }
+
+  const { eventId, status } = pendingSuperManualAttendanceUpdate;
+  const event = superManualEventsCache.find((item) => Number(item.idevent_info) === Number(eventId));
+  if (!event) {
+    closeSuperManualConfirmModal();
+    showNotification("Event not found. Reload the student details.", "error");
+    return;
+  }
+
+  const label = status === "present" ? "Present" : status === "late" ? "Late" : "Absent";
+  closeModal("superManualConfirmModal");
+  pendingSuperManualAttendanceUpdate = null;
+
+  const { date: phDate, time: phTime } = getPhilippinesDateTimeParts();
+  const recordDate = event.date || phDate;
+  const recordTime = status === "absent" ? "23:59:00" : phTime;
+
+  try {
+    const { data: existingAttendance, error: findError } = await supabaseClient
+      .from("attendance")
+      .select("idattendance")
+      .eq("student_id", selectedSuperManualStudent.idstudent_info)
+      .eq("event_id", Number(eventId))
+      .maybeSingle();
+
+    if (findError) throw findError;
+
+    const attendancePayload = {
+      student_id: selectedSuperManualStudent.idstudent_info,
+      event_id: Number(eventId),
+      status,
+      scan_time: recordTime,
+      date: recordDate,
+      student_name_cached: selectedSuperManualStudent.name,
+      student_school_id_cached: selectedSuperManualStudent.student_id,
+    };
+
+    if (existingAttendance) {
+      const { error: updateError } = await supabaseClient
+        .from("attendance")
+        .update(attendancePayload)
+        .eq("idattendance", existingAttendance.idattendance);
+      if (updateError) throw updateError;
+    } else {
+      const { error: insertError } = await supabaseClient
+        .from("attendance")
+        .insert(attendancePayload);
+      if (insertError) throw insertError;
+    }
+
+    const { data: matchingSanctions, error: sanctionFindError } = await supabaseClient
+      .from("sanctions")
+      .select("id, event_name")
+      .eq("idstudent_info", selectedSuperManualStudent.idstudent_info);
+
+    if (sanctionFindError) throw sanctionFindError;
+
+    const sanctionIdsToDelete = (matchingSanctions || [])
+      .filter((sanction) =>
+        normalizeEventNameForMatch(sanction.event_name) === normalizeEventNameForMatch(event.event_name)
+      )
+      .map((sanction) => sanction.id);
+
+    if (sanctionIdsToDelete.length) {
+      const { error: deleteError } = await supabaseClient
+        .from("sanctions")
+        .delete()
+        .in("id", sanctionIdsToDelete);
+      if (deleteError) throw deleteError;
+    }
+
+    if (status === "late" || status === "absent") {
+      const { error: sanctionInsertError } = await supabaseClient
+        .from("sanctions")
+        .insert({
+          idstudent_info: selectedSuperManualStudent.idstudent_info,
+          student_id: selectedSuperManualStudent.student_id,
+          student_name: selectedSuperManualStudent.name,
+          event_name: event.event_name,
+          penalty: status === "late" ? "Late" : "Absent",
+          fee: status === "late" ? 500 : 1500,
+          date_given: recordDate,
+          status: "pending",
+        });
+      if (sanctionInsertError) throw sanctionInsertError;
+    }
+
+    showNotification(`${selectedSuperManualStudent.name} marked as ${label} for this event.`, "success");
+    await loadSuperManualEventRecords();
+    if (typeof fetchSanctions === "function") fetchSanctions(sanctionCurrentPage);
+    if (typeof filterAttendance === "function") filterAttendance(attendanceCurrentPage);
+  } catch (err) {
+    console.error("Super manual attendance update failed:", err);
+    showNotification("Failed to update attendance/sanction. Check console.", "error");
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   loadManualEventOptions(); // fill dropdown
+  const superManualSearchInput = document.getElementById("superManualSearchInput");
+  if (superManualSearchInput) {
+    superManualSearchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchSuperManualStudents();
+      }
+    });
+  }
 });
 
 // ================= Dashboard Logic =================
@@ -4004,8 +4171,7 @@ async function loadDashboardStats(eventId) {
       .eq("status", "absent");
 
     // ✅ Update dashboard UI
-    document.getElementById("statAttendance").textContent =
-      (presentCount ?? 0) + (lateCount ?? 0);
+    document.getElementById("statAttendance").textContent = presentCount ?? 0;
 
     document.getElementById("lateAbsentInfo").textContent =
       `Late: ${lateCount ?? 0} | Absent: ${absentCount ?? 0}`;
@@ -4061,10 +4227,10 @@ function changeAttendancePage(direction) {
 
   const yearLevel = document.getElementById("attendanceYearFilter")?.value || "";
   const section = document.getElementById("sectionFilter")?.value || "";
-  const team = document.getElementById("teamFilter")?.value || "";
+  const role = document.getElementById("attendanceRoleFilter")?.value || "";
   const searchValue = document.getElementById("searchInput")?.value?.trim().toLowerCase() || "";
 
-  filterAttendance(newPage, yearLevel, section, team, searchValue);
+  filterAttendance(newPage, yearLevel, section, role, searchValue);
 }
 
 
@@ -4072,8 +4238,9 @@ function changeAttendancePage(direction) {
 
 async function exportAttendanceCSV() {
   const eventId = document.getElementById("eventFilter")?.value || "";
+  const yearLevel = document.getElementById("attendanceYearFilter")?.value || "";
   const section = document.getElementById("sectionFilter")?.value || "";
-  const teamId = document.getElementById("teamFilter")?.value || "";
+  const role = document.getElementById("attendanceRoleFilter")?.value || "";
   try {
     if (!eventId) {
       showNotification("⚠️ Please select an event first.", "warning");
@@ -4087,11 +4254,7 @@ async function exportAttendanceCSV() {
         ? eventSelect.options[eventSelect.selectedIndex].text
         : "Selected Event";
 
-    const teamSelect = document.getElementById("teamFilter");
-    const teamName =
-      teamSelect && teamSelect.selectedIndex > 0
-        ? teamSelect.options[teamSelect.selectedIndex].text
-        : "";
+    const roleName = role ? formatStudentRole(role) : "";
 
     // ✅ Fetch ALL attendance data in batches (bypasses 1000 limit)
     let allData = [];
@@ -4110,8 +4273,7 @@ async function exportAttendanceCSV() {
             name,
             year_level,
             section,
-            team_id,
-            teams (team_name)
+            role
           ),
           event_info (event_name)
         `)
@@ -4149,9 +4311,9 @@ async function exportAttendanceCSV() {
       );
     }
 
-    if (teamId) {
+    if (role) {
       filtered = filtered.filter(
-        att => String(att.student_info?.team_id) === String(teamId)
+        att => normalizeStudentRole(att.student_info?.role) === role
       );
     }
 
@@ -4166,12 +4328,12 @@ async function exportAttendanceCSV() {
     );
 
     // ✅ Build CSV header
-    let csv = "Student ID,Name,Year Level,Section,Team,Event,Time,Status\n";
+    let csv = "Student ID,Name,Year Level,Section,Role,Event,Time,Status\n";
 
     // ✅ Add CSV rows
     filtered.forEach(row => {
       const student = row.student_info || {};
-      const team = student.teams?.team_name ?? "-";
+      const studentRole = formatStudentRole(student.role);
       let formattedTime = row.scan_time || "-";
 
       if (row.scan_time && row.scan_time.includes(":")) {
@@ -4186,19 +4348,25 @@ async function exportAttendanceCSV() {
         `"${student.name ?? "-"}",` +
         `"${student.year_level ?? "-"}",` +
         `"${student.section ?? "-"}",` +
-        `"${team}",` +
+        `"${studentRole}",` +
         `"${row.event_info?.event_name ?? "-"}",` +
         `"${formattedTime}",` +
         `"${row.status ?? "-"}"\n`;
     });
 
-    // ✅ Build filename with Year Level, Team Name, Section, and Date
+    // ✅ Build filename with Year Level, Role, Section, and Date
     const dateStr = new Date().toISOString().split("T")[0];
+    const safeFilePart = (value, fallback) =>
+      String(value || fallback)
+        .replace(/[\\/:*?"<>|]/g, "")
+        .replace(/\s+/g, "_")
+        .slice(0, 80);
+
     let fileName = "Attendance";
-    fileName += eventName ? `-${eventName}` : "-AllEvents";
-    fileName += yearLevel ? `-${yearLevel}` : "-AllYears";
-    fileName += teamName ? `-${teamName}` : "-AllTeams";
-    fileName += section ? `-Section${section}` : "-AllSections";
+    fileName += `-${safeFilePart(eventName, "AllEvents")}`;
+    fileName += `-${safeFilePart(yearLevel, "AllYears")}`;
+    fileName += `-${safeFilePart(roleName, "AllRoles")}`;
+    fileName += `-${safeFilePart(section ? `Section${section}` : "", "AllSections")}`;
     fileName += `-${dateStr}`;
 
     // ✅ Create downloadable CSV with UTF-8 BOM (for ñ, é, ü)
@@ -4258,6 +4426,7 @@ async function loadRecentActivity(eventId) {
         )
       `)
       .eq("event_id", eventId)
+      .in("status", ["present", "late"])
       .order("date", { ascending: false })
       .order("scan_time", { ascending: false })
       .limit(20);
@@ -4275,7 +4444,7 @@ async function loadRecentActivity(eventId) {
     table.innerHTML = "";
 
     if (data.length === 0) {
-      table.innerHTML = `<tr><td colspan="6">No attendance records found for this event.</td></tr>`;
+      table.innerHTML = `<tr><td colspan="6">No recent scans found for this event.</td></tr>`;
       return;
     }
 
@@ -4341,32 +4510,6 @@ async function loadSectionsForSanctions() {
   }
 }
 
-// 🔹 Load teams into Sanctions filter
-async function loadTeamsForSanctions() {
-  try {
-    const { data, error } = await supabaseClient
-      .from("teams")
-      .select("idteam, team_name")
-      .order("team_name", { ascending: true });
-
-    if (error) throw error;
-
-    const teamFilter = document.getElementById("sanctionTeamFilter");
-    if (!teamFilter) return;
-
-    teamFilter.innerHTML = `<option value="">All Teams</option>`;
-    data.forEach(team => {
-      const opt = document.createElement("option");
-      opt.value = team.idteam;
-      opt.textContent = team.team_name;
-      teamFilter.appendChild(opt);
-    });
-  } catch (err) {
-    console.error("❌ Error loading teams for sanctions:", err);
-  }
-}
-
-
 async function loadSanctionEventFilter() {
   try {
     const { data, error } = await supabaseClient
@@ -4417,7 +4560,7 @@ function renderStudentTable(data) {
             </button>
           </div>
         </td>
-        <td>${escapeHTML(student.teams ? student.teams.team_name : "-")}</td>
+        <td>${escapeHTML(formatStudentRole(student.role))}</td>
 
         <td>
           <span class="status-badge ${student.status === "active" ? "present" : "inactive"}">
@@ -4467,43 +4610,6 @@ async function loadSections() {
 }
 
 
-// ✅ Load Teams Dropdown
-async function loadTeamsForStudents() {
-  try {
-    // ✅ Fetch both ID and name so we can use ID for filtering
-    const { data, error } = await supabaseClient
-      .from("teams")
-      .select("idteam, team_name")
-      .order("team_name", { ascending: true });
-
-    if (error) throw error;
-
-    const teamFilter = document.getElementById("studentTeamFilter");
-    if (!teamFilter) {
-      console.warn("⚠️ studentTeamFilter not found.");
-      return;
-    }
-
-    // ✅ Clear and re-add default option
-    teamFilter.innerHTML = `<option value="">All Teams</option>`;
-
-    // ✅ Add each team as <option value="idteam">Team Name</option>
-    data.forEach(team => {
-      const opt = document.createElement("option");
-      opt.value = team.idteam;              // use ID for filtering
-      opt.textContent = team.team_name;     // display team name
-      teamFilter.appendChild(opt);
-    });
-
-    console.log("✅ Loaded Teams:", data.map(t => t.team_name));
-  } catch (error) {
-    console.error("❌ Error loading teams:", error);
-  }
-}
-
-
-
-// ✅ Populate Section and Team filters for Attendance panel
 async function populateAttendanceFilters() {
   // Load sections
   const { data: students, error: sectErr } = await supabaseClient
@@ -4517,22 +4623,6 @@ async function populateAttendanceFilters() {
       sectionFilter.innerHTML = `<option value="">All Sections</option>`;
       uniqueSections.forEach(sec => {
         sectionFilter.innerHTML += `<option value="${escapeHTML(sec)}">${escapeHTML(sec)}</option>`;
-      });
-    }
-  }
-
-  // Load teams
-  const { data: teams, error: teamErr } = await supabaseClient
-    .from("teams")
-    .select("idteam, team_name")
-    .order("team_name", { ascending: true });
-
-  if (!teamErr && teams) {
-    const teamFilter = document.getElementById("teamFilter");
-    if (teamFilter) {
-      teamFilter.innerHTML = `<option value="">All Teams</option>`;
-      teams.forEach(team => {
-        teamFilter.innerHTML += `<option value="${team.idteam}">${escapeHTML(team.team_name)}</option>`;
       });
     }
   }
@@ -4603,17 +4693,9 @@ async function verifySanctionPassword(event) {
       passwordInput.value = "";
       errorDiv.style.display = "none";
 
-      // Show the Sanctions section
-      document.querySelectorAll(".nav-link").forEach(l => l.classList.remove("active"));
-      document.querySelector('[data-section="sanctions"]').classList.add("active");
-
-      document.querySelectorAll(".content-section").forEach(s => s.classList.remove("active"));
-      document.getElementById("sanctions").classList.add("active");
-
-      document.getElementById("pageTitle").textContent = "Sanctions";
-
-      // Load sanctions data
-      fetchSanctions();
+      const targetSection = pendingProtectedSection || "sanctions";
+      activateAdminSection(targetSection);
+      if (targetSection === "sanctions") fetchSanctions();
     } else {
       // Log failed access
       await logSanctionAccess(session.user.id, adminUsername, "denied");
@@ -4637,7 +4719,7 @@ function cancelSanctionAccess() {
 
   // Stay on current section or go to dashboard
   const currentActive = document.querySelector(".nav-link.active");
-  if (!currentActive || currentActive.dataset.section === "sanctions") {
+  if (!currentActive || currentActive.dataset.section === "sanctions" || currentActive.dataset.section === "superManual") {
     document.querySelector('[data-section="dashboard"]').click();
   }
 }
