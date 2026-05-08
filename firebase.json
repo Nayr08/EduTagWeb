@@ -11,6 +11,7 @@
       "TESTING_CHECKLIST.md",
       "*.md",
       "*.sql",
+      "server.js",
       "package.json",
       "package-lock.json",
       "supabase/**"
