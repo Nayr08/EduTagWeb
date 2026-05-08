@@ -15,6 +15,60 @@ let pendingSuperManualAttendanceUpdate = null;
 let isRedirectingToLogin = false;
 const FORCE_LOGOUT_VERSION_KEY = "force_logout_version";
 const LOCAL_FORCE_LOGOUT_VERSION_KEY = "edutag_force_logout_version";
+const filterOptionsCache = {
+  events: null,
+  studentMeta: null,
+};
+
+function invalidateFilterOptionsCache(options = {}) {
+  const { events = false, students = false } = options;
+  if (events) filterOptionsCache.events = null;
+  if (students) filterOptionsCache.studentMeta = null;
+}
+
+async function getCachedEvents(force = false) {
+  if (!force && filterOptionsCache.events) return filterOptionsCache.events;
+
+  const { data, error } = await supabaseClient
+    .from("event_info")
+    .select("idevent_info, event_name, status, date, closed")
+    .order("date", { ascending: false });
+
+  if (error) throw error;
+  filterOptionsCache.events = data || [];
+  return filterOptionsCache.events;
+}
+
+async function getCachedStudentMeta(force = false) {
+  if (!force && filterOptionsCache.studentMeta) return filterOptionsCache.studentMeta;
+
+  const { data, error } = await supabaseClient
+    .from("student_info")
+    .select("year_level, section");
+
+  if (error) throw error;
+
+  filterOptionsCache.studentMeta = {
+    years: [...new Set((data || []).map((row) => row.year_level).filter(Boolean))].sort(),
+    sections: [...new Set((data || []).map((row) => row.section).filter(Boolean))].sort(),
+  };
+  return filterOptionsCache.studentMeta;
+}
+
+function populateSelectOptions(selectId, placeholder, values) {
+  const dropdown = document.getElementById(selectId);
+  if (!dropdown) return null;
+
+  dropdown.innerHTML = `<option value="">${placeholder}</option>`;
+  values.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    dropdown.appendChild(option);
+  });
+
+  return dropdown;
+}
 
 function normalizeStudentRole(role) {
   return role === "officer" ? "officer" : "student";
@@ -843,7 +897,7 @@ async function filterAttendance(page = 1) {
     const table = document.getElementById("attendanceTable");
     table.innerHTML = "";
 
-    if (!pageData.length) {
+    if (!pageData?.length) {
       table.innerHTML = `<tr><td colspan="6">No attendance records found.</td></tr>`;
     } else {
       for (const att of pageData) {
@@ -1032,6 +1086,7 @@ async function deleteStudent(id) {
     return;
   }
   showNotification("🗑️ Student deleted", "success");
+  invalidateFilterOptionsCache({ students: true });
   loadStudents();
 }
 async function findStudent() {
@@ -1065,11 +1120,13 @@ async function saveSanction(event) {
 
   const studentId = document.getElementById("sanctionStudentId").value.trim();
   const studentName = document.getElementById("sanctionStudentName").value.trim();
-  const eventName = document.getElementById("sanctionEvent").value.trim();
+  const sanctionEventSelect = document.getElementById("sanctionEvent");
+  const eventId = sanctionEventSelect?.value || "";
+  const eventName = sanctionEventSelect?.selectedOptions?.[0]?.dataset?.eventName || "";
   const penalty = document.getElementById("sanctionPenalty").value;
   const fee = document.getElementById("sanctionFee").value;
 
-  if (!studentId || !studentName || !eventName || !penalty || !fee) {
+  if (!studentId || !studentName || !eventId || !eventName || !penalty || !fee) {
     showNotification(" Please fill in all fields.", "warning");
     return;
   }
@@ -1095,6 +1152,7 @@ async function saveSanction(event) {
         idstudent_info: student.idstudent_info, // ✅ Foreign key from student_info
         student_id: studentId,
         student_name: studentName,
+        event_id: Number(eventId),
         event_name: eventName,
         penalty,
         fee: Number(fee),
@@ -1118,9 +1176,27 @@ async function saveSanction(event) {
 }
 
 async function loadSanctionEventDropdown() {
+  try {
+    const data = await getCachedEvents();
+    const dropdown = document.getElementById("sanctionEvent");
+    if (!dropdown) return;
+
+    dropdown.innerHTML = `<option value="">Select Event</option>`;
+    data.forEach(ev => {
+      const option = document.createElement("option");
+      option.value = ev.idevent_info;
+      option.dataset.eventName = ev.event_name;
+      option.textContent = `${ev.event_name} (${ev.status})`;
+      dropdown.appendChild(option);
+    });
+  } catch (error) {
+    console.error("Error loading events:", error);
+  }
+  return;
+
   const { data, error } = await supabaseClient
     .from("event_info")
-    .select("event_name, status, date")
+    .select("idevent_info, event_name, status, date")
     .order("date", { ascending: false });
 
   if (error) {
@@ -1131,7 +1207,11 @@ async function loadSanctionEventDropdown() {
   const dropdown = document.getElementById("sanctionEvent");
   dropdown.innerHTML = `<option value="">Select Event</option>`;
   data.forEach(ev => {
-    dropdown.innerHTML += `<option value="${escapeHTML(ev.event_name)}">${escapeHTML(ev.event_name)} (${escapeHTML(ev.status)})</option>`;
+    const option = document.createElement("option");
+    option.value = ev.idevent_info;
+    option.dataset.eventName = ev.event_name;
+    option.textContent = `${ev.event_name} (${ev.status})`;
+    dropdown.appendChild(option);
   });
 }
 
@@ -1169,6 +1249,7 @@ async function addStudent() {
   }
 
   showNotification("Student added successfully!", "success");
+  invalidateFilterOptionsCache({ students: true });
   loadStudents();
   closeModal("addStudentModal");
   document.getElementById("addStudentForm").reset();
@@ -1344,11 +1425,11 @@ async function performDeleteEvent(eventId) {
     }
     console.log('DEBUG: attendance deleted for event id=', eventId);
 
-    // 2) delete sanctions which reference this event name
+    // 2) delete sanctions which reference this event
     const { error: delSanErr } = await supabaseClient
       .from('sanctions')
       .delete()
-      .eq('event_name', eventName);
+      .eq('event_id', eventId);
 
     if (delSanErr) {
       console.error('Error deleting sanctions for event:', delSanErr);
@@ -1356,7 +1437,7 @@ async function performDeleteEvent(eventId) {
       try { if (logId) await supabaseClient.from('event_deletion_logs').update({ status: 'failed' }).eq('id', logId); } catch (e) { console.warn('Failed to update deletion log status:', e); }
       return;
     }
-    console.log('DEBUG: sanctions deleted for event name=', eventName);
+    console.log('DEBUG: sanctions deleted for event id=', eventId);
 
     // 3) delete the event itself
     const { error: delEvErr } = await supabaseClient
@@ -1374,6 +1455,7 @@ async function performDeleteEvent(eventId) {
     try { if (logId) await supabaseClient.from('event_deletion_logs').update({ status: 'success' }).eq('id', logId); } catch (e) { console.warn('Failed to update deletion log status to success:', e); }
 
     showNotification(' Event and related records deleted successfully!', "success");
+    invalidateFilterOptionsCache({ events: true });
     loadEvents(); // refresh table
   } catch (err) {
     console.error('❌ Error deleting event and related data:', err);
@@ -1388,6 +1470,7 @@ async function loadEvents() {
     .from("event_info")
     .select("idevent_info, event_name, date, time_start, time_end, late_until, status, closed")
     .order("date", { ascending: false });
+  if (!error) filterOptionsCache.events = data || [];
 
   if (error) {
     console.error("❌ Error loading events:", error);
@@ -1412,9 +1495,12 @@ async function loadEvents() {
     // ✅ Conditionally show buttons based on event status
     let actionButtons = '';
     if (event.status === 'completed') {
-      // ✅ Completed events: only delete button (no edit)
+      // ✅ Completed events: finalize intentionally, or delete
       actionButtons = `
         <td>
+          <button class="btn btn-primary" onclick="openFinalizeEventModal(${event.idevent_info})" title="Finalize event and mark missing students absent">
+            <i class="fas fa-clipboard-check"></i>
+          </button>
           <button class="btn btn-danger" onclick="deleteEvent(${event.idevent_info})">
             <i class="fas fa-trash"></i>
           </button>
@@ -1470,6 +1556,46 @@ async function loadEvents() {
     if (dashboardEventFilter) dashboardEventFilter.appendChild(opt);
   });
   updateEventStats();
+}
+
+async function loadEventOptions(selectId, valueColumn = "idevent_info", includeStatus = false) {
+  try {
+    const data = await getCachedEvents();
+    const dropdown = document.getElementById(selectId);
+    if (!dropdown) return;
+
+    dropdown.innerHTML = `<option value="">Select Event</option>`;
+    data.forEach((event) => {
+      const option = document.createElement("option");
+      option.value = valueColumn === "event_name" ? event.event_name : event.idevent_info;
+      option.textContent = includeStatus ? `${event.event_name} (${event.status})` : event.event_name;
+      dropdown.appendChild(option);
+    });
+  } catch (error) {
+    console.error(`Error loading events for ${selectId}:`, error);
+  }
+  return;
+
+  const { data, error } = await supabaseClient
+    .from("event_info")
+    .select("idevent_info, event_name, status")
+    .order("date", { ascending: false });
+
+  if (error) {
+    console.error(`Error loading events for ${selectId}:`, error);
+    return;
+  }
+
+  const dropdown = document.getElementById(selectId);
+  if (!dropdown) return;
+
+  dropdown.innerHTML = `<option value="">Select Event</option>`;
+  data.forEach((event) => {
+    const option = document.createElement("option");
+    option.value = valueColumn === "event_name" ? event.event_name : event.idevent_info;
+    option.textContent = includeStatus ? `${event.event_name} (${event.status})` : event.event_name;
+    dropdown.appendChild(option);
+  });
 }
 
 
@@ -1603,6 +1729,7 @@ async function createEvents() {
   } else {
     showNotification(" Event created successfully!", "success");
     closeModal("addEventModal");
+    invalidateFilterOptionsCache({ events: true });
     loadEvents(); // refresh events table
   }
 }
@@ -1694,6 +1821,110 @@ if (rfidInputElement) {
 
 
 async function exportSanctionsCSV() {
+  try {
+    const filters = getSanctionFiltersFromUI();
+
+    if (!filters.eventId) {
+      showNotification("Please select an event before exporting sanctions.", "warning");
+      return;
+    }
+
+    const roleName = filters.role ? formatStudentRole(filters.role) : "";
+    let allData = [];
+    let from = 0;
+    const batchSize = 1000;
+
+    while (true) {
+      const { data, error } = await buildSanctionsQuery(`
+        id,
+        student_name,
+        student_info!inner (
+          name,
+          year_level,
+          section,
+          role
+        ),
+        event_name,
+        penalty,
+        fee,
+        date_given,
+        status
+      `, filters)
+        .order("student_name", { ascending: true })
+        .range(from, from + batchSize - 1);
+
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+
+      allData = allData.concat(data);
+      if (data.length < batchSize) break;
+      from += batchSize;
+    }
+
+    if (!allData.length) {
+      showNotification("No sanctions data to export for the selected filters.", "error");
+      return;
+    }
+
+    let csv = "Name,Year Level,Section,Event,Penalty,Fee,Date Given,Status\n";
+    const csvCell = (value) => `"${String(value ?? "-").replace(/"/g, '""')}"`;
+
+    allData.forEach(row => {
+      const student = row.student_info || {};
+      const studentName = student.name || row.student_name || "-";
+      const formattedDate = row.date_given
+        ? new Date(row.date_given + "T00:00:00").toLocaleDateString("en-PH", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit"
+        })
+        : "-";
+
+      csv += [
+        csvCell(studentName),
+        csvCell(student.year_level),
+        csvCell(student.section),
+        csvCell(row.event_name || filters.eventName),
+        csvCell(row.penalty),
+        csvCell(row.fee ? Number(row.fee).toLocaleString() : "-"),
+        csvCell(formattedDate),
+        csvCell(row.status),
+      ].join(",") + "\n";
+    });
+
+    const dateStr = new Date().toISOString().split("T")[0];
+    const safeFilePart = (value, fallback) =>
+      String(value || fallback)
+        .replace(/[\\/:*?"<>|]/g, "")
+        .replace(/\s+/g, "_")
+        .slice(0, 80);
+
+    let fileName = "Sanctions";
+    fileName += `-${safeFilePart(filters.eventName, "SelectedEvent")}`;
+    fileName += `-${safeFilePart(filters.yearLevel, "AllYears")}`;
+    fileName += `-${safeFilePart(roleName, "AllRoles")}`;
+    fileName += `-${safeFilePart(filters.section ? `Section${filters.section}` : "", "AllSections")}`;
+    fileName += `-${dateStr}`;
+
+    const bom = "\uFEFF";
+    const blob = new Blob([bom + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${fileName}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    console.log(`Exported ${allData.length} sanction records to ${fileName}.csv`);
+    return;
+  } catch (err) {
+    console.error("Failed to export sanctions CSV:", err);
+    showNotification("Failed to export sanctions.", "error");
+    return;
+  }
+
   const eventName = document.getElementById("sanctionEventFilter")?.value || "";
   const section = document.getElementById("sanctionSectionFilter")?.value || "";
   const role = document.getElementById("sanctionRoleFilter")?.value || "";
@@ -1942,7 +2173,8 @@ function stopTesting() {
 
 
 // ✅ Update only upcoming or ongoing events
-async function updateAllEvents() {
+async function updateAllEvents(options = {}) {
+  const { refreshEventsTable = true } = options;
   try {
     const { data: events, error } = await supabaseClient
       .from("event_info")
@@ -1960,7 +2192,7 @@ async function updateAllEvents() {
       if (!event.date) continue;
 
       const newStatus = getEventStatus(event.date, event.time_start, event.late_until);
-      const newClosed = (newStatus === "completed");
+      const newClosed = newStatus === "completed" ? Boolean(event.closed) : false;
 
       // ✅ Update DB only if something changed
       if (newStatus !== event.status || newClosed !== event.closed) {
@@ -1975,24 +2207,13 @@ async function updateAllEvents() {
           updatedCount++;
           console.log(`✅ Event ${event.event_name} updated to ${newStatus}`);
 
-          if (newClosed && !event.closed) {
-            try {
-              await markAbsenteesWithRetry(event);
-            } catch (err) {
-              if (!navigator.onLine) {
-                enqueueRetry(() => markAbsenteesWithRetry(event));
-              } else {
-                console.error("❌ Failed to mark absentees for event:", event.event_name, err);
-              }
-            }
-          }
-
         }
       }
     }
 
     console.log(`🔄 ${updatedCount}/${events.length} events updated`);
-    loadEvents(); // Refresh your events table UI
+    if (updatedCount > 0) invalidateFilterOptionsCache({ events: true });
+    if (refreshEventsTable) loadEvents(); // Refresh your events table UI
   } catch (err) {
     console.error("❌ updateAllEvents failed:", err);
   }
@@ -2247,6 +2468,7 @@ async function checkRFID(uid) {
           idstudent_info: student.idstudent_info,
           student_id: student.student_id,
           student_name: student.name,
+          event_id: Number(eventId),
           event_name: event.event_name,
           penalty: "Late",
           fee: 500,
@@ -2404,6 +2626,7 @@ async function markAbsenteesForEvent(event) {
       idstudent_info: student.idstudent_info,
       student_id: student.student_id,
       student_name: student.name,
+      event_id: event.idevent_info,
       event_name: event.event_name,
       penalty: "Absent",
       fee: 1500,
@@ -2647,6 +2870,7 @@ async function markAbsenteesWithRetry(event) {
       idstudent_info: a.idstudent_info,
       student_id: a.student_id,
       student_name: a.name,
+      event_id: event.idevent_info,
       event_name: event.event_name,
       penalty: "Absent",
       fee: 1500,
@@ -2702,6 +2926,7 @@ async function markAbsenteesWithRetry(event) {
     } else {
       showNotification(`⚠️ Failed to auto-mark absentees for "${event.event_name}". Check console.`, "error");
     }
+    throw err;
   }
 }
 
@@ -2710,6 +2935,105 @@ async function markAbsenteesWithRetry(event) {
 
 
 
+
+let pendingFinalizeEventId = null;
+
+async function openFinalizeEventModal(eventId) {
+  pendingFinalizeEventId = Number(eventId);
+  const message = document.getElementById("finalizeEventMessage");
+  const error = document.getElementById("finalizeEventError");
+
+  if (error) error.style.display = "none";
+  if (message) message.textContent = "Loading event details...";
+
+  openModal("finalizeEventModal");
+
+  try {
+    const { data: event, error: eventError } = await supabaseClient
+      .from("event_info")
+      .select("idevent_info, event_name, status")
+      .eq("idevent_info", pendingFinalizeEventId)
+      .single();
+
+    if (eventError || !event) throw eventError || new Error("Event not found");
+
+    if (message) {
+      message.textContent = `Finalize "${event.event_name}"? This will mark students with no attendance record as absent and create their matching sanctions.`;
+    }
+  } catch (err) {
+    console.error("Failed to prepare finalize event modal:", err);
+    if (message) message.textContent = "Could not load this event. Please try again.";
+  }
+}
+
+function closeFinalizeEventModal() {
+  pendingFinalizeEventId = null;
+  const error = document.getElementById("finalizeEventError");
+  if (error) error.style.display = "none";
+  closeModal("finalizeEventModal");
+}
+
+async function confirmFinalizeEvent() {
+  if (!pendingFinalizeEventId) {
+    closeFinalizeEventModal();
+    return;
+  }
+
+  const confirmBtn = document.getElementById("finalizeEventConfirmBtn");
+  const error = document.getElementById("finalizeEventError");
+  const eventId = pendingFinalizeEventId;
+
+  try {
+    if (confirmBtn) {
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = "Finalizing...";
+    }
+    if (error) error.style.display = "none";
+
+    const { data: event, error: eventError } = await supabaseClient
+      .from("event_info")
+      .select("idevent_info, event_name, date, time_start, time_end, late_until, status, closed")
+      .eq("idevent_info", eventId)
+      .single();
+
+    if (eventError || !event) throw eventError || new Error("Event not found");
+
+    if (event.status !== "completed") {
+      throw new Error("Only completed events can be finalized.");
+    }
+
+    await markAbsenteesWithRetry(event);
+    await reconcileSanctionsForEvent(event.event_name, event.idevent_info);
+
+    const { error: updateError } = await supabaseClient
+      .from("event_info")
+      .update({ closed: true })
+      .eq("idevent_info", eventId);
+
+    if (updateError) throw updateError;
+
+    showNotification(`Finalized "${event.event_name}". Missing students were marked absent.`, "success");
+    closeFinalizeEventModal();
+
+    sectionLoadState.dashboard = false;
+    sectionLoadState.attendance = false;
+    sectionLoadState.sanctions = false;
+    await loadEvents();
+  } catch (err) {
+    console.error("Failed to finalize event:", err);
+    if (error) {
+      error.textContent = err.message || "Could not finalize this event. Check console for details.";
+      error.style.display = "block";
+    } else {
+      showNotification("Could not finalize this event. Check console for details.", "error");
+    }
+  } finally {
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Finalize Event";
+    }
+  }
+}
 
 async function deleteAttendance(id) {
   if (!confirm("Are you sure you want to delete this attendance record?")) return;
@@ -2837,6 +3161,7 @@ async function saveStudentEdit() {
 
     showNotification("Student updated successfully!", "success");
     closeModal("editStudentModal");
+    invalidateFilterOptionsCache({ students: true });
     loadStudents();
   } catch (err) {
     console.error("Error updating student:", err);
@@ -2923,6 +3248,7 @@ async function saveEventEdit() {
 
   showNotification("✅ Event updated successfully!", "success");
   closeModal("editEventModal");
+  invalidateFilterOptionsCache({ events: true });
   loadEvents(); // refresh table
   
   // Recalculate attendance statuses for this event after editing times (run in background)
@@ -2949,6 +3275,20 @@ function togglePassword(inputId, iconId) {
 
 // ✅ Event dropdown
 async function loadEventFilter() {
+  try {
+    const data = await getCachedEvents();
+    const filter = document.getElementById("eventFilter");
+    if (!filter) return;
+
+    filter.innerHTML = `<option value="">All Events</option>`;
+    data.forEach((ev) => {
+      filter.innerHTML += `<option value="${ev.idevent_info}">${escapeHTML(ev.event_name)}</option>`;
+    });
+  } catch (error) {
+    console.error("Error loading events:", error);
+  }
+  return;
+
   const { data, error } = await supabaseClient
     .from("event_info")
     .select("idevent_info, event_name")
@@ -2985,23 +3325,28 @@ function showNotification(message, type = "info") {
 let sanctionCurrentPage = 1;
 const sanctionRowsPerPage = 100;
 
-async function reconcileSanctionsForEvent(eventName) {
-  if (!eventName) return 0;
+async function reconcileSanctionsForEvent(eventName, eventId = null) {
+  if (!eventName && !eventId) return 0;
 
   try {
-    const { data: event, error: eventError } = await supabaseClient
-      .from("event_info")
-      .select("idevent_info")
-      .eq("event_name", eventName)
-      .maybeSingle();
+    let resolvedEventId = eventId ? Number(eventId) : null;
+    if (!resolvedEventId) {
+      const { data: event, error: eventError } = await supabaseClient
+        .from("event_info")
+        .select("idevent_info")
+        .eq("event_name", eventName)
+        .maybeSingle();
 
-    if (eventError) throw eventError;
-    if (!event?.idevent_info) return 0;
+      if (eventError) throw eventError;
+      resolvedEventId = event?.idevent_info || null;
+    }
+
+    if (!resolvedEventId) return 0;
 
     const { data: sanctions, error: sanctionError } = await supabaseClient
       .from("sanctions")
       .select("id, idstudent_info, penalty, status")
-      .eq("event_name", eventName)
+      .eq("event_id", resolvedEventId)
       .neq("status", "resolved");
 
     if (sanctionError) throw sanctionError;
@@ -3010,7 +3355,7 @@ async function reconcileSanctionsForEvent(eventName) {
     const { data: attendance, error: attendanceError } = await supabaseClient
       .from("attendance")
       .select("student_id, status")
-      .eq("event_id", event.idevent_info);
+      .eq("event_id", resolvedEventId);
 
     if (attendanceError) throw attendanceError;
 
@@ -3043,6 +3388,86 @@ async function reconcileSanctionsForEvent(eventName) {
   }
 }
 
+function getSanctionFiltersFromUI() {
+  const eventFilter = document.getElementById("sanctionEventFilter");
+  const selectedEventOption = eventFilter?.selectedOptions?.[0];
+  const eventId = eventFilter?.value || "";
+  const eventName = selectedEventOption?.dataset?.eventName || selectedEventOption?.textContent || "";
+
+  return {
+    showResolved: document.getElementById("showResolvedCheckbox")?.checked || false,
+    eventId,
+    eventName,
+    section: document.getElementById("sanctionSectionFilter")?.value || "",
+    role: document.getElementById("sanctionRoleFilter")?.value || "",
+    yearLevel: document.getElementById("sanctionYearFilter")?.value || "",
+    searchQuery: document.getElementById("searchInput")?.value.trim() || "",
+  };
+}
+
+function buildSanctionsQuery(selectColumns, filters, options = {}) {
+  let query = supabaseClient
+    .from("sanctions")
+    .select(selectColumns, options)
+    .eq("event_id", Number(filters.eventId));
+
+  if (!filters.showResolved) query = query.neq("status", "resolved");
+  if (filters.yearLevel) query = query.eq("student_info.year_level", filters.yearLevel);
+  if (filters.section) query = query.eq("student_info.section", filters.section);
+  if (filters.role) query = query.eq("student_info.role", filters.role);
+
+  if (filters.searchQuery) {
+    const safeSearch = filters.searchQuery.replace(/[,%]/g, " ").trim();
+    if (safeSearch) {
+      const pattern = `%${safeSearch}%`;
+      query = query.or(`student_name.ilike.${pattern},penalty.ilike.${pattern},status.ilike.${pattern}`);
+    }
+  }
+
+  return query;
+}
+
+async function loadSanctionStats(filters) {
+  let sanctions = [];
+  let from = 0;
+  const batchSize = 1000;
+
+  while (true) {
+    const { data, error } = await buildSanctionsQuery(`
+      fee,
+      penalty,
+      status,
+      student_info!inner (
+        year_level,
+        section,
+        role
+      )
+    `, filters).range(from, from + batchSize - 1);
+
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+
+    sanctions = sanctions.concat(data);
+    if (data.length < batchSize) break;
+    from += batchSize;
+  }
+
+  const resolvedSanctions = sanctions.filter((s) => s.status === "resolved");
+  const unresolvedSanctions = sanctions.filter((s) => s.status !== "resolved");
+  const absentSanctions = sanctions.filter((s) => s.penalty?.toLowerCase() === "absent");
+  const lateSanctions = sanctions.filter((s) => s.penalty?.toLowerCase() === "late");
+
+  return {
+    totalStudents: sanctions.length,
+    resolvedStudents: resolvedSanctions.length,
+    noOfAbsent: absentSanctions.length,
+    noOfLate: lateSanctions.length,
+    totalFee: sanctions.reduce((sum, s) => sum + (Number(s.fee) || 0), 0),
+    unresolvedFee: unresolvedSanctions.reduce((sum, s) => sum + (Number(s.fee) || 0), 0),
+    resolvedFee: resolvedSanctions.reduce((sum, s) => sum + (Number(s.fee) || 0), 0),
+  };
+}
+
 async function fetchSanctions(page = 1) {
   const loader = document.getElementById("sanctionLoading");
   if (loader) {
@@ -3051,25 +3476,11 @@ async function fetchSanctions(page = 1) {
   }
 
   try {
-    // --- Filters from dropdowns ---
-    const showResolved = document.getElementById("showResolvedCheckbox")?.checked || false;
-    const eventName = document.getElementById("sanctionEventFilter")?.value || "";
-    const section = document.getElementById("sanctionSectionFilter")?.value || "";
-    const role = document.getElementById("sanctionRoleFilter")?.value || "";
-    const yearLevel = document.getElementById("sanctionYearFilter")?.value || "";
+    const filters = getSanctionFiltersFromUI();
 
-    // 🔍 ADDED: Get search query
-    const searchQuery = document.getElementById("searchInput")?.value.trim().toLowerCase() || "";
-
-
-    // --- Load all sanctions (bypassing pagination limit) ---
-    let allSanctions = [];
-    let from = 0;
-    const batch = 1000;
-
-    if (!eventName) {
+    if (!filters.eventId) {
       const table = document.getElementById("sanctionTable");
-      table.innerHTML = `<tr><td colspan="9">Please select an event to view sanctions.</td></tr>`;
+      table.innerHTML = `<tr><td colspan="8">Please select an event to view sanctions.</td></tr>`;
       document.getElementById("sanctionTotalRecords").textContent = 0;
       document.getElementById("sanctionCurrentPage").textContent = 1;
       document.getElementById("sanctionTotalPages").textContent = 1;
@@ -3082,82 +3493,59 @@ async function fetchSanctions(page = 1) {
       return;
     }
 
-    await reconcileSanctionsForEvent(eventName);
+    await reconcileSanctionsForEvent(filters.eventName, Number(filters.eventId));
+    if (filters.searchQuery) page = 1;
 
-    while (true) {
-      const { data, error } = await supabaseClient
-        .from("sanctions")
-        .select(`
-          id,
-          student_info (
-            name,
-            year_level,
-            section,
-            role
-          ),
-          event_name,
-          penalty,
-          fee,
-          date_given,
-          status
-        `)
-        .eq("event_name", eventName)
-        .order("date_given", { ascending: false })
-        .range(from, from + batch - 1);
+    const totalQuery = buildSanctionsQuery(`
+      id,
+      student_info!inner (
+        year_level,
+        section,
+        role
+      )
+    `, filters, { count: "exact", head: true });
 
-      if (error) {
-        console.error("❌ Error loading sanctions:", error);
-        throw error;
-      }
+    const { count, error: countError } = await totalQuery;
+    if (countError) throw countError;
 
-      if (!data || data.length === 0) break;
-      allSanctions = allSanctions.concat(data);
-      if (data.length < batch) break;
-      from += batch;
-    }
-
-    console.log(`✅ Loaded ${allSanctions.length} total sanctions for event: ${eventName}`);
-
-    // --- Client-side filtering ---
-    let filtered = allSanctions;
-
-    if (!showResolved) filtered = filtered.filter((s) => s.status !== "resolved");
-    if (yearLevel) filtered = filtered.filter((s) => String(s.student_info?.year_level) === String(yearLevel));
-    if (section) filtered = filtered.filter((s) => s.student_info?.section === section);
-    if (role) filtered = filtered.filter((s) => normalizeStudentRole(s.student_info?.role) === role);
-
-    // 🔍 ADDED: Global search across all pages
-    if (searchQuery) {
-      filtered = filtered.filter((s) => {
-        const name = s.student_info?.name?.toLowerCase() || "";
-        const penalty = s.penalty?.toLowerCase() || "";
-        const status = s.status?.toLowerCase() || "";
-        return name.includes(searchQuery) || penalty.includes(searchQuery) || status.includes(searchQuery);
-      });
-      page = 1; // always reset to first page when searching
-    }
-
-    // --- Sort alphabetically ---
-    filtered.sort((a, b) => (a.student_info?.name || "").localeCompare(b.student_info?.name || ""));
-
-    // --- Pagination ---
-    const totalRecords = filtered.length;
+    const totalRecords = count || 0;
     const totalPages = Math.max(1, Math.ceil(totalRecords / sanctionRowsPerPage));
     const currentPage = Math.min(Math.max(1, page || 1), totalPages);
     sanctionCurrentPage = currentPage;
 
     const startIndex = (currentPage - 1) * sanctionRowsPerPage;
-    const pageData = filtered.slice(startIndex, startIndex + sanctionRowsPerPage);
+    const endIndex = startIndex + sanctionRowsPerPage - 1;
+
+    const { data: pageData, error: pageError } = await buildSanctionsQuery(`
+      id,
+      student_name,
+      student_info!inner (
+        name,
+        year_level,
+        section,
+        role
+      ),
+      event_name,
+      penalty,
+      fee,
+      date_given,
+      status
+    `, filters)
+      .order("student_name", { ascending: true })
+      .range(startIndex, endIndex);
+
+    if (pageError) throw pageError;
 
     // --- Render Table ---
     const table = document.getElementById("sanctionTable");
     table.innerHTML = "";
 
     if (!pageData.length) {
-      table.innerHTML = `<tr><td colspan="9">No sanctions found for this event and filter combination.</td></tr>`;
+      table.innerHTML = `<tr><td colspan="8">No sanctions found for this event and filter combination.</td></tr>`;
     } else {
       for (const sanction of pageData) {
         const student = sanction.student_info || {};
+        const studentName = student.name || sanction.student_name || "-";
         const formattedDate = sanction.date_given
           ? new Date(sanction.date_given + "T00:00:00").toLocaleDateString("en-PH", {
             year: "numeric",
@@ -3168,10 +3556,9 @@ async function fetchSanctions(page = 1) {
 
         const row = `
           <tr>
-            <td>${escapeHTML(student.name || "-")}</td>
+            <td>${escapeHTML(studentName)}</td>
             <td>${escapeHTML(student.year_level || "-")}</td>
             <td>${escapeHTML(student.section || "-")}</td>
-            <td>${escapeHTML(sanction.event_name || "-")}</td>
             <td>${escapeHTML(sanction.penalty || "-")}</td>
             <td>₱${Number(sanction.fee || 0).toLocaleString()}</td>
             <td>${formattedDate}</td>
@@ -3193,36 +3580,22 @@ async function fetchSanctions(page = 1) {
     document.getElementById("sanctionCurrentPage").textContent = currentPage;
     document.getElementById("sanctionTotalPages").textContent = totalPages;
 
-    // --- Update stat cards (no changes below) ---
-    const resolvedSanctions = filtered.filter((s) => s.status === "resolved");
-    const unresolvedSanctions = filtered.filter((s) => s.status !== "resolved");
-    const absentSanctions = filtered.filter((s) => s.penalty?.toLowerCase() === "absent");
-    const lateSanctions = filtered.filter((s) => s.penalty?.toLowerCase() === "late");
+    const stats = await loadSanctionStats(filters);
 
+    document.getElementById("totalSanctionStudents").textContent = stats.totalStudents;
+    document.getElementById("resolvedSanctionStudents").textContent = stats.resolvedStudents;
+    document.getElementById("noOfLate").textContent = stats.noOfLate;
+    document.getElementById("noOfAbsent").textContent = stats.noOfAbsent;
 
-    const totalStudents = filtered.length;
-    const resolvedStudents = resolvedSanctions.length;
-    const noOfAbsent = absentSanctions.length;
-    const noOfLate = lateSanctions.length;
-
-    const totalFee = filtered.reduce((sum, s) => sum + (Number(s.fee) || 0), 0);
-    const resolvedFee = resolvedSanctions.reduce((sum, s) => sum + (Number(s.fee) || 0), 0);
-    const unresolvedFee = unresolvedSanctions.reduce((sum, s) => sum + (Number(s.fee) || 0), 0);
-
-    document.getElementById("totalSanctionStudents").textContent = totalStudents;
-    document.getElementById("resolvedSanctionStudents").textContent = resolvedStudents;
-    document.getElementById("noOfLate").textContent = noOfLate;
-    document.getElementById("noOfAbsent").textContent = noOfAbsent;
-
-    document.getElementById("totalSanctionFee").textContent = `₱${totalFee.toLocaleString()}`;
-    document.getElementById("unresolvedFee").textContent = `₱${unresolvedFee.toLocaleString()}`;
-    document.getElementById("resolvedFee").textContent = `₱${resolvedFee.toLocaleString()}`;
+    document.getElementById("totalSanctionFee").textContent = `₱${stats.totalFee.toLocaleString()}`;
+    document.getElementById("unresolvedFee").textContent = `₱${stats.unresolvedFee.toLocaleString()}`;
+    document.getElementById("resolvedFee").textContent = `₱${stats.resolvedFee.toLocaleString()}`;
 
   } catch (err) {
     console.error("❌ fetchSanctions failed:", err);
     const table = document.getElementById("sanctionTable");
     if (table)
-      table.innerHTML = `<tr><td colspan="9">⚠️ Error loading sanctions. Check console.</td></tr>`;
+      table.innerHTML = `<tr><td colspan="8">⚠️ Error loading sanctions. Check console.</td></tr>`;
 
     if (!navigator.onLine) enqueueRetry(() => fetchSanctions(page));
   } finally {
@@ -3244,6 +3617,14 @@ function changeSanctionPage(direction) {
 
 
 async function loadYearLevelsForSanctions() {
+  try {
+    const { years } = await getCachedStudentMeta();
+    populateSelectOptions("sanctionYearFilter", "All Year Levels", years);
+  } catch (err) {
+    console.error("Error loading year levels for sanctions:", err);
+  }
+  return;
+
   try {
     const { data, error } = await supabaseClient
       .from("student_info")
@@ -3349,6 +3730,71 @@ async function markAttendance(student_id, event_id) {
 
 
 
+const sectionLoadState = {
+  dashboard: false,
+  attendance: false,
+  students: false,
+  events: false,
+  sanctions: false,
+  superManual: false,
+};
+
+async function loadSectionData(section, options = {}) {
+  const { force = false } = options;
+  if (!force && sectionLoadState[section]) return;
+
+  switch (section) {
+    case "dashboard":
+      await loadDashboardEvents();
+      sectionLoadState.dashboard = true;
+      break;
+
+    case "attendance":
+      await Promise.all([
+        loadEventOptions("eventFilter"),
+        loadManualEventOptions(),
+        populateAttendanceFilters(),
+        populateAttendanceYearFilter(),
+      ]);
+      sectionLoadState.attendance = true;
+      break;
+
+    case "students":
+      await Promise.all([
+        loadStudents(1),
+        loadSections(),
+        loadYearLevels(),
+      ]);
+      sectionLoadState.students = true;
+      break;
+
+    case "events":
+      await updateAllEvents({ refreshEventsTable: true });
+      sectionLoadState.events = true;
+      sectionLoadState.dashboard = false;
+      sectionLoadState.attendance = false;
+      sectionLoadState.sanctions = false;
+      break;
+
+    case "sanctions":
+      await Promise.all([
+        loadYearLevelsForSanctions(),
+        loadSectionsForSanctions(),
+        loadSanctionEventFilter(),
+      ]);
+      await fetchSanctions(1);
+      sectionLoadState.sanctions = true;
+      break;
+
+    case "superManual":
+      sectionLoadState.superManual = true;
+      break;
+
+    default:
+      break;
+  }
+}
+
 // -------------------- INIT --------------------
 document.addEventListener("DOMContentLoaded", async () => {
   const pageLoader = document.getElementById("pageLoader");
@@ -3367,29 +3813,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   await new Promise(requestAnimationFrame);
-  await loadAdminInfo();
-
-  await updateAllEvents();
-
-  autoFixMissingAbsentees().catch(err => {
-    console.error("Auto-fix encountered an error:", err);
-  });
-
-  // Fetch everything in parallel for speed
   await Promise.all([
-    loadStudents(),
-    loadEvents(),
-    populateAttendanceFilters(),
-    populateAttendanceYearFilter(),
-    fetchSanctions(),
-    loadSections(),
-    loadYearLevelsForSanctions(),
-    loadSectionsForSanctions(),      // ✅ ADD THIS
-    loadSanctionEventFilter(),        // ✅ ADD THIS
-    loadDashboardEvents(),            // ✅ ADD THIS (for dashboard)
-    loadYearLevels(),
+    loadAdminInfo(),
     loadStudentMaintenanceStatus(),
   ]);
+  await updateAllEvents({ refreshEventsTable: false });
+  await loadSectionData("dashboard", { force: true });
 
   if (pageLoader) pageLoader.classList.add("hidden");
 });
@@ -3551,6 +3980,7 @@ document.querySelectorAll(".nav-link").forEach(link => {
 
     // Normal navigation for other sections or if access already granted
     activateAdminSection(section);
+    await loadSectionData(section);
 
     // Reset search
     const searchInput = document.getElementById("searchInput");
@@ -3569,21 +3999,7 @@ document.querySelectorAll(".nav-link").forEach(link => {
 
 // ✅ Load events into Manual Attendance dropdown
 async function loadManualEventOptions() {
-  const { data, error } = await supabaseClient
-    .from("event_info")
-    .select("idevent_info, event_name")
-    .order("date", { ascending: false });
-
-  if (error) {
-    console.error("❌ Error loading events for manual attendance:", error);
-    return;
-  }
-
-  const dropdown = document.getElementById("attendanceEvent");
-  dropdown.innerHTML = `<option value="">Select Event</option>`;
-  data.forEach((ev) => {
-    dropdown.innerHTML += `<option value="${ev.idevent_info}">${escapeHTML(ev.event_name)}</option>`;
-  });
+  await loadEventOptions("attendanceEvent");
 }
 
 // ✅ Fetch student name by ID
@@ -3895,13 +4311,95 @@ async function loadSuperManualEventRecords() {
   }
 }
 
+async function getAuditActor() {
+  const session = await getValidAdminSession();
+  const adminId = session?.user?.id || null;
+  let adminUsername = document.getElementById("adminName")?.textContent?.trim() || session?.user?.email || "unknown";
+
+  if (adminId) {
+    const { data, error } = await supabaseClient
+      .from("admin_info")
+      .select("admin_username")
+      .eq("auth_id", adminId)
+      .maybeSingle();
+
+    if (!error && data?.admin_username) adminUsername = data.admin_username;
+  }
+
+  return { adminId, adminUsername };
+}
+
+function normalizeAuditSanctions(sanctions) {
+  return (sanctions || []).map((sanction) => ({
+    id: sanction.id,
+    event_id: sanction.event_id,
+    event_name: sanction.event_name,
+    penalty: sanction.penalty,
+    fee: sanction.fee,
+    status: sanction.status,
+    date_given: sanction.date_given,
+  }));
+}
+
+async function getSuperManualSanctionsForEvent(studentInternalId, eventName, eventId = null) {
+  const { data, error } = await supabaseClient
+    .from("sanctions")
+    .select("id, event_id, event_name, penalty, fee, status, date_given")
+    .eq("idstudent_info", studentInternalId);
+
+  if (error) throw error;
+
+  return (data || []).filter((sanction) => {
+    if (eventId && Number(sanction.event_id) === Number(eventId)) return true;
+    return normalizeEventNameForMatch(sanction.event_name) === normalizeEventNameForMatch(eventName);
+  });
+}
+
+async function logSuperManualAudit(entry) {
+  try {
+    const { adminId, adminUsername } = await getAuditActor();
+    const { error } = await supabaseClient
+      .from("super_manual_audit_logs")
+      .insert({
+        admin_id: adminId,
+        admin_username: adminUsername,
+        action: entry.action,
+        student_internal_id: entry.studentInternalId,
+        student_id: entry.studentId,
+        student_name: entry.studentName,
+        event_id: entry.eventId || null,
+        event_name: entry.eventName || null,
+        old_attendance_status: entry.oldAttendanceStatus || null,
+        new_attendance_status: entry.newAttendanceStatus || null,
+        old_role: entry.oldRole || null,
+        new_role: entry.newRole || null,
+        old_sanction_state: entry.oldSanctionState ?? null,
+        new_sanction_state: entry.newSanctionState ?? null,
+      });
+
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error("Failed to write Super Manual audit log:", err);
+    showNotification("Change saved, but audit log failed. Run the audit setup SQL if needed.", "warning");
+    return false;
+  }
+}
+
 async function updateSuperManualRole() {
   if (!selectedSuperManualStudent) {
     showNotification("Select a student first.", "warning");
     return;
   }
 
+  const oldRole = normalizeStudentRole(selectedSuperManualStudent.role);
   const nextRole = normalizeStudentRole(document.getElementById("superManualRoleSelect")?.value);
+
+  if (oldRole === nextRole) {
+    showNotification(`${selectedSuperManualStudent.name} is already ${formatStudentRole(nextRole)}.`, "info");
+    return;
+  }
+
   const { error } = await supabaseClient
     .from("student_info")
     .update({ role: nextRole })
@@ -3913,10 +4411,20 @@ async function updateSuperManualRole() {
     return;
   }
 
+  await logSuperManualAudit({
+    action: "role_update",
+    studentInternalId: selectedSuperManualStudent.idstudent_info,
+    studentId: selectedSuperManualStudent.student_id,
+    studentName: selectedSuperManualStudent.name,
+    oldRole,
+    newRole: nextRole,
+  });
+
   selectedSuperManualStudent.role = nextRole;
+  invalidateFilterOptionsCache({ students: true });
   showNotification(`Role updated to ${formatStudentRole(nextRole)}.`, "success");
   searchSuperManualStudents();
-  loadStudents();
+  if (sectionLoadState.students) loadStudents(studentsCurrentPage);
 }
 
 async function updateSuperManualAttendance(eventId, status) {
@@ -3973,12 +4481,19 @@ async function confirmSuperManualAttendanceUpdate() {
   try {
     const { data: existingAttendance, error: findError } = await supabaseClient
       .from("attendance")
-      .select("idattendance")
+      .select("idattendance, status, scan_time, date")
       .eq("student_id", selectedSuperManualStudent.idstudent_info)
       .eq("event_id", Number(eventId))
       .maybeSingle();
 
     if (findError) throw findError;
+
+    const oldAttendanceStatus = existingAttendance?.status || "missing";
+    const oldSanctions = await getSuperManualSanctionsForEvent(
+      selectedSuperManualStudent.idstudent_info,
+      event.event_name,
+      eventId
+    );
 
     const attendancePayload = {
       student_id: selectedSuperManualStudent.idstudent_info,
@@ -4003,18 +4518,7 @@ async function confirmSuperManualAttendanceUpdate() {
       if (insertError) throw insertError;
     }
 
-    const { data: matchingSanctions, error: sanctionFindError } = await supabaseClient
-      .from("sanctions")
-      .select("id, event_name")
-      .eq("idstudent_info", selectedSuperManualStudent.idstudent_info);
-
-    if (sanctionFindError) throw sanctionFindError;
-
-    const sanctionIdsToDelete = (matchingSanctions || [])
-      .filter((sanction) =>
-        normalizeEventNameForMatch(sanction.event_name) === normalizeEventNameForMatch(event.event_name)
-      )
-      .map((sanction) => sanction.id);
+    const sanctionIdsToDelete = oldSanctions.map((sanction) => sanction.id);
 
     if (sanctionIdsToDelete.length) {
       const { error: deleteError } = await supabaseClient
@@ -4031,6 +4535,7 @@ async function confirmSuperManualAttendanceUpdate() {
           idstudent_info: selectedSuperManualStudent.idstudent_info,
           student_id: selectedSuperManualStudent.student_id,
           student_name: selectedSuperManualStudent.name,
+          event_id: Number(eventId),
           event_name: event.event_name,
           penalty: status === "late" ? "Late" : "Absent",
           fee: status === "late" ? 500 : 1500,
@@ -4040,10 +4545,29 @@ async function confirmSuperManualAttendanceUpdate() {
       if (sanctionInsertError) throw sanctionInsertError;
     }
 
+    const newSanctions = await getSuperManualSanctionsForEvent(
+      selectedSuperManualStudent.idstudent_info,
+      event.event_name,
+      eventId
+    );
+
+    await logSuperManualAudit({
+      action: "attendance_correction",
+      studentInternalId: selectedSuperManualStudent.idstudent_info,
+      studentId: selectedSuperManualStudent.student_id,
+      studentName: selectedSuperManualStudent.name,
+      eventId: Number(eventId),
+      eventName: event.event_name,
+      oldAttendanceStatus,
+      newAttendanceStatus: status,
+      oldSanctionState: normalizeAuditSanctions(oldSanctions),
+      newSanctionState: normalizeAuditSanctions(newSanctions),
+    });
+
     showNotification(`${selectedSuperManualStudent.name} marked as ${label} for this event.`, "success");
     await loadSuperManualEventRecords();
-    if (typeof fetchSanctions === "function") fetchSanctions(sanctionCurrentPage);
-    if (typeof filterAttendance === "function") filterAttendance(attendanceCurrentPage);
+    if (sectionLoadState.sanctions && typeof fetchSanctions === "function") fetchSanctions(sanctionCurrentPage);
+    if (sectionLoadState.attendance && typeof filterAttendance === "function") filterAttendance(attendanceCurrentPage);
   } catch (err) {
     console.error("Super manual attendance update failed:", err);
     showNotification("Failed to update attendance/sanction. Check console.", "error");
@@ -4051,7 +4575,6 @@ async function confirmSuperManualAttendanceUpdate() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  loadManualEventOptions(); // fill dropdown
   const superManualSearchInput = document.getElementById("superManualSearchInput");
   if (superManualSearchInput) {
     superManualSearchInput.addEventListener("keydown", (event) => {
@@ -4067,6 +4590,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // Populate event dropdown for dashboard
 async function loadDashboardEvents() {
+  try {
+    const events = await getCachedEvents();
+    const filter = document.getElementById("dashboardEventFilter");
+    if (!filter) return;
+
+    filter.innerHTML = `<option value="">Select Event</option>`;
+    events.forEach((event) => {
+      const opt = document.createElement("option");
+      opt.value = event.idevent_info;
+      opt.textContent = `${event.event_name} (${event.status})`;
+      filter.appendChild(opt);
+    });
+  } catch (error) {
+    console.error("Error fetching events for dashboard:", error);
+  }
+  return;
+
   const { data: events, error } = await supabaseClient
     .from("event_info")
     .select("idevent_info, event_name, status")
@@ -4108,6 +4648,8 @@ function resetDashboard() {
   document.getElementById("activeEventsInfo").textContent = "Ongoing: 0 | Upcoming: 0";
   document.getElementById("statAttendance").textContent = "0";
   document.getElementById("lateAbsentInfo").textContent = "Late: 0 | Absent: 0";
+  document.getElementById("statTotalRecorded").textContent = "0";
+  document.getElementById("statMissing").textContent = "0";
   document.getElementById("recentActivityTable").innerHTML =
     `<tr><td colspan="4">Select an event to view activity...</td></tr>`;
 }
@@ -4124,6 +4666,59 @@ async function loadDashboardStats(eventId) {
     await new Promise(requestAnimationFrame);
   }
 
+  try {
+    const { count: totalStudents } = await supabaseClient
+      .from("student_info")
+      .select("*", { count: "exact", head: true })
+      .eq("role", "student");
+
+    document.getElementById("statTotalStudents").textContent = totalStudents ?? 0;
+
+    const events = await getCachedEvents();
+    const ongoing = events.filter(
+      (ev) => ev.status?.toLowerCase() === "ongoing" && ev.closed === false
+    ).length;
+    const upcoming = events.filter(
+      (ev) => ev.status?.toLowerCase() === "upcoming" && ev.closed === false
+    ).length;
+    document.getElementById("activeEventsInfo").textContent =
+      `Ongoing: ${ongoing} | Upcoming: ${upcoming}`;
+
+    const [presentResult, lateResult, absentResult] = await Promise.all([
+      supabaseClient
+        .from("attendance")
+        .select("*", { count: "exact", head: true })
+        .eq("event_id", eventId)
+        .eq("status", "present"),
+      supabaseClient
+        .from("attendance")
+        .select("*", { count: "exact", head: true })
+        .eq("event_id", eventId)
+        .eq("status", "late"),
+      supabaseClient
+        .from("attendance")
+        .select("*", { count: "exact", head: true })
+        .eq("event_id", eventId)
+        .eq("status", "absent"),
+    ]);
+
+    const presentCount = presentResult.count ?? 0;
+    const lateCount = lateResult.count ?? 0;
+    const absentCount = absentResult.count ?? 0;
+    const totalRecorded = presentCount + lateCount + absentCount;
+    const missingCount = Math.max((totalStudents ?? 0) - totalRecorded, 0);
+
+    document.getElementById("statAttendance").textContent = presentCount;
+    document.getElementById("lateAbsentInfo").textContent =
+      `Late: ${lateCount} | Absent: ${absentCount}`;
+    document.getElementById("statTotalRecorded").textContent = totalRecorded;
+    document.getElementById("statMissing").textContent = missingCount;
+  } catch (err) {
+    console.error("loadDashboardStats failed:", err);
+  } finally {
+    if (loader) loader.classList.remove("active");
+  }
+  return;
   try {
     // ✅ Total Students (server-side count)
     const { count: totalStudents } = await supabaseClient
@@ -4487,6 +5082,14 @@ async function loadRecentActivity(eventId) {
 // 🔹 Load sections into Sanctions filter
 async function loadSectionsForSanctions() {
   try {
+    const { sections } = await getCachedStudentMeta();
+    populateSelectOptions("sanctionSectionFilter", "All Sections", sections);
+  } catch (err) {
+    console.error("Error loading sections for sanctions:", err);
+  }
+  return;
+
+  try {
     const { data, error } = await supabaseClient
       .from("student_info")
       .select("section")
@@ -4512,9 +5115,29 @@ async function loadSectionsForSanctions() {
 
 async function loadSanctionEventFilter() {
   try {
+    const data = await getCachedEvents();
+    const eventFilter = document.getElementById("sanctionEventFilter");
+    if (!eventFilter) return;
+
+    eventFilter.innerHTML = `<option value="">Select Event</option>`;
+    [...data]
+      .sort((a, b) => String(a.event_name || "").localeCompare(String(b.event_name || "")))
+      .forEach(ev => {
+        const opt = document.createElement("option");
+        opt.value = ev.idevent_info;
+        opt.dataset.eventName = ev.event_name;
+        opt.textContent = ev.event_name;
+        eventFilter.appendChild(opt);
+      });
+  } catch (err) {
+    console.error("Error loading sanction events:", err);
+  }
+  return;
+
+  try {
     const { data, error } = await supabaseClient
       .from("event_info")
-      .select("event_name")
+      .select("idevent_info, event_name")
       .order("event_name", { ascending: true });
 
     if (error) throw error;
@@ -4525,7 +5148,8 @@ async function loadSanctionEventFilter() {
     eventFilter.innerHTML = `<option value="">Select Event</option>`;
     data.forEach(ev => {
       const opt = document.createElement("option");
-      opt.value = ev.event_name;
+      opt.value = ev.idevent_info;
+      opt.dataset.eventName = ev.event_name;
       opt.textContent = ev.event_name;
       eventFilter.appendChild(opt);
     });
@@ -4582,6 +5206,14 @@ function renderStudentTable(data) {
 }
 
 async function loadSections() {
+  try {
+    const { sections } = await getCachedStudentMeta();
+    populateSelectOptions("studentSectionFilter", "All Sections", sections);
+  } catch (err) {
+    console.error("Error loading sections:", err);
+  }
+  return;
+
   const { data, error } = await supabaseClient
     .from("student_info")
     .select("section");
@@ -4611,6 +5243,14 @@ async function loadSections() {
 
 
 async function populateAttendanceFilters() {
+  try {
+    const { sections } = await getCachedStudentMeta();
+    populateSelectOptions("sectionFilter", "All Sections", sections);
+  } catch (err) {
+    console.error("Error loading attendance sections:", err);
+  }
+  return;
+
   // Load sections
   const { data: students, error: sectErr } = await supabaseClient
     .from("student_info")
@@ -4630,6 +5270,14 @@ async function populateAttendanceFilters() {
 
 
 async function populateAttendanceYearFilter() {
+  try {
+    const { years } = await getCachedStudentMeta();
+    populateSelectOptions("attendanceYearFilter", "All Year Levels", years);
+  } catch (err) {
+    console.error("Failed to populate year levels:", err);
+  }
+  return;
+
   try {
     const { data, error } = await supabaseClient
       .from("student_info")
@@ -4695,7 +5343,7 @@ async function verifySanctionPassword(event) {
 
       const targetSection = pendingProtectedSection || "sanctions";
       activateAdminSection(targetSection);
-      if (targetSection === "sanctions") fetchSanctions();
+      await loadSectionData(targetSection);
     } else {
       // Log failed access
       await logSanctionAccess(session.user.id, adminUsername, "denied");
@@ -4808,6 +5456,14 @@ function switchPage(newPageTitle) {
 }
 
 async function loadYearLevels() {
+  try {
+    const { years } = await getCachedStudentMeta();
+    populateSelectOptions("studentYearFilter", "All Year Levels", years);
+  } catch (err) {
+    console.error("Error loading year levels:", err);
+  }
+  return;
+
   try {
     const { data, error } = await supabaseClient
       .from("student_info")

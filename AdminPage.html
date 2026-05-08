@@ -151,7 +151,7 @@
         <div class="stat-card">
           <div class="stat-card-header">
             <div class="stat-card-title">Present</div>
-            <div class="stat-card-icon" style="background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);">
+            <div class="stat-card-icon" style="background: linear-gradient(135deg, #20c997 0%, #30b6b7 100%);">
               <i class="fas fa-clipboard-check"></i>
             </div>
           </div>
@@ -168,6 +168,26 @@
           <div class="stat-card-value">
             <span id="lateAbsentInfo">Late: 0 | Absent: 0</span>
           </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card-header">
+            <div class="stat-card-title">Total Recorded</div>
+            <div class="stat-card-icon" style="background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);">
+              <i class="fas fa-list-check"></i>
+            </div>
+          </div>
+          <div class="stat-card-value" id="statTotalRecorded">0</div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-card-header">
+            <div class="stat-card-title">Missing</div>
+            <div class="stat-card-icon" style="background: linear-gradient(135deg, #f97316 0%, #ef4444 100%);">
+              <i class="fas fa-circle-question"></i>
+            </div>
+          </div>
+          <div class="stat-card-value" id="statMissing">0</div>
         </div>
 
 
@@ -609,7 +629,6 @@
                 <th>Year Level</th>
                 <th>Section</th>
                
-                <th>Event</th>
                 <th>Penalty</th>
                 <th>Fee</th>
                 <th>Date Given</th>
@@ -1167,6 +1186,29 @@
         </div>
         <div class="modal-footer">
           <button class="btn btn-primary" onclick="saveEventEdit()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Finalize Event Confirmation Modal -->
+    <div class="modal" id="finalizeEventModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Finalize Event</h3>
+          <button class="modal-close" onclick="closeFinalizeEventModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="finalizeEventMessage" style="margin-bottom: 10px;">
+            Finalize this event?
+          </p>
+          <p style="font-size: 13px; color: #718096;">
+            This will mark students without an attendance record as absent and create matching sanctions.
+          </p>
+          <div id="finalizeEventError" style="color: #e74c3c; display: none; margin-top: 10px; font-weight: 500;"></div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px;">
+          <button class="btn btn-secondary" onclick="closeFinalizeEventModal()">Cancel</button>
+          <button class="btn btn-primary" id="finalizeEventConfirmBtn" onclick="confirmFinalizeEvent()">Finalize Event</button>
         </div>
       </div>
     </div>

@@ -7,7 +7,7 @@
 
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: #f8fafc;
+    background: #f4f7f9;
     color: #2d3748;
     line-height: 1.6;
     overflow-x: hidden;
@@ -218,6 +218,7 @@ body {
     background: white;
     padding: 20px;
     border-radius: 15px;
+    border: 1px solid #e2e8f0;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
     margin-bottom: 30px;
     display: flex;
@@ -329,73 +330,6 @@ body {
     border-color: #30b6b7;
     box-shadow: 0 0 5px rgba(48, 182, 183, 0.3);
 }
-/* Team modal tweaks */
-.team-actions input.form-control {
-  flex: 1;
-}
-
-/* ðŸŽ¯ Team Management Table only */
-#teamModal .table {
-  width: auto;          /* shrink table to fit content */
-  margin: 0 auto;       /* center it inside modal */
-  border-collapse: collapse;
-  font-size: 14px;
-}
-
-#teamModal .table th,
-#teamModal .table td {
-  padding: 10px 14px;
-  white-space: nowrap;
-  border-bottom: 1px solid #eee;
-}
-
-/* Actions column compact */
-#teamModal .actions-col {
-  width: 100px;   /* adjust width until buttons align neatly */
-  text-align: center;
-}
-
-#teamModal .actions-cell {
-  display: flex;
-  justify-content: center;
-  gap: 6px; /* spacing between edit/delete buttons */
-}
-
-/* Optional hover styling for rows */
-#teamModal .table tr:nth-child(even) {
-  background: #fafafa;
-}
-
-
-
-.team-actions {
-    display: flex;
-    align-items: center;
-    margin-bottom: 15px;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.team-actions .input-field {
-    flex: 1;
-    min-width: 200px;
-}
-
-.team-actions .btn-primary {
-    padding: 10px 20px;
-    border-radius: 8px;
-    border: none;
-    background-color: #30b6b7;
-    color: #fff;
-    font-size: 16px;
-    cursor: pointer;
-    transition: background-color 0.2s;
-    white-space: nowrap;
-}
-
-.team-actions .btn-primary:hover {
-    background-color: #289a9b;
-}
 /* Wrapper to center and prevent overflow */
 .table-wrapper {
   width: 100%;
@@ -470,52 +404,6 @@ body {
   color: #dc3545;
 }
 
-/* âœ… Only applies to the Team Management table */
-#teamsTableSmall {
-  width: auto;                /* Table adjusts only to its content */
-  border-collapse: collapse;  /* Neat borders */
-  table-layout: auto;         /* Prevents forced equal column widths */
-  margin: 0 auto;             /* Optional: center the table */
-}
-
-#teamsTableSmall th,
-#teamsTableSmall td {
-  padding: 8px 12px;
-  text-align: left;
-  white-space: nowrap;        /* Keeps text in one line */
-}
-
-#teamsTableSmall .actions-col,
-#teamsTableSmall .actions-cell {
-  text-align: center;
-  width: 1%;                  /* Forces the actions column to shrink */
-  white-space: nowrap;
-}
-/* âœ… Make Teams table shrink to fit its content */
-#teamsTableSmall {
-  width: auto;                /* Only as wide as needed */
-  max-width: 100%;            /* Prevent overflow outside modal */
-  border-collapse: collapse;
-  margin: 0 auto;             /* Center the table */
-  table-layout: auto;         /* Columns auto-size */
-}
-
-/* Table cells for Teams table */
-#teamsTableSmall th,
-#teamsTableSmall td {
-  padding: 8px 12px;
-  text-align: left;
-  white-space: nowrap;        /* Prevents breaking lines */
-}
-
-/* Make Actions column shrink tightly */
-#teamsTableSmall .actions-col,
-#teamsTableSmall td:last-child {
-  text-align: center;
-  width: 1%;
-  white-space: nowrap;
-}
-
 /* Stats Cards */
 .stats-grid {
     display: grid;
@@ -528,6 +416,7 @@ body {
     background: white;
     padding: 25px;
     border-radius: 15px;
+    border: 1px solid #e2e8f0;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
     transition: transform 0.3s ease;
 }
@@ -589,6 +478,7 @@ body {
     padding: 25px;
     padding-bottom: 15px;
     border-radius: 15px;
+    border: 1px solid #e2e8f0;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
     margin-bottom: 30px;
     display: none;
@@ -1195,15 +1085,6 @@ body {
         justify-content: center;
     }
 
-    .team-actions {
-        flex-direction: column;
-        align-items: stretch;
-    }
-
-    .team-actions .input-field {
-        min-width: auto;
-    }
-
     .form-grid {
         grid-template-columns: 1fr;
     }
@@ -1300,14 +1181,6 @@ body {
         font-size: 16px; /* Prevents zoom on iOS */
     }
 }
-/* Override global table rules for Teams modal */
-#teamModal .table {
-  width: auto !important;       /* shrink to content */
-  min-width: unset !important;  /* remove 600px restriction */
-  max-width: 100%;              /* stay inside modal */
-  table-layout: auto !important;
-}
-
 /* Extra small screens */
 @media (max-width: 360px) {
     .sidebar {
@@ -2036,7 +1909,7 @@ body {
   font-size: 19px;
 }
 
-.stat-grid {
+.stats-grid {
   gap: 14px;
   margin-bottom: 18px;
 }
